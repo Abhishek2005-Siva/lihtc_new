@@ -1,0 +1,364 @@
+{
+  "$schema": "https://example.local/lihtc-neo4j-ontology.schema.json",
+  "name": "LIHTC Knowledge Graph Ontology",
+  "version": "2026-07-06",
+  "source": "Merged from live Neo4j graph + silver layer schema_reference",
+  "labels": [
+    "State",
+    "County",
+    "CensusTract",
+    "MetroArea",
+    "QCTDesignation",
+    "SDDADesignation",
+    "NMDDADesignation",
+    "Section8AMILimit",
+    "SpecialProgramLimit",
+    "StateAMILimit",
+    "LenderBehaviorRisk"
+  ],
+  "relationship_types": [
+    "IN_STATE",
+    "IN_COUNTY",
+    "IN_METRO",
+    "APPLIES_TO",
+    "HAS_MSA_AMI",
+    "HAS_STATE_AMI"
+  ],
+  "primary_keys": {
+    "State": "state_fips",
+    "County": "county_fips",
+    "CensusTract": "fips_code",
+    "MetroArea": "cbsa_code",
+    "QCTDesignation": "designation_id",
+    "SDDADesignation": "designation_id",
+    "NMDDADesignation": "designation_id",
+    "Section8AMILimit": "limit_id",
+    "SpecialProgramLimit": "limit_id",
+    "StateAMILimit": "limit_id",
+    "LenderBehaviorRisk": "risk_id"
+  },
+  "data_year_ranges": {
+    "QCTDesignation.designation_year": "2003-2025",
+    "SDDADesignation.designation_year": "2019-2025",
+    "NMDDADesignation.designation_year": "2017-2025",
+    "Section8AMILimit.year": "2010-2025",
+    "StateAMILimit.year": "2010-2025",
+    "LenderBehaviorRisk.assessment_year": "2022-2025 (STRING)"
+  },
+  "node_counts": {
+    "State": 56,
+    "County": 3235,
+    "CensusTract": 85529,
+    "MetroArea": 443,
+    "QCTDesignation": 1657416,
+    "SDDADesignation": 3179,
+    "NMDDADesignation": 6044,
+    "Section8AMILimit": 124425,
+    "SpecialProgramLimit": 124425,
+    "StateAMILimit": 2412,
+    "LenderBehaviorRisk": 8983
+  },
+  "properties_by_label": {
+    "State": ["state_fips", "name", "abbreviation", "state_abbr", "state_name"],
+    "County": ["county_fips", "state_fips", "county_name"],
+    "CensusTract": ["fips_code", "state_fips", "county_fips", "cbsa_code", "fmr_area_code", "is_metro", "is_metro_tract"],
+    "MetroArea": ["cbsa_code", "fmr_area_code", "state_fips", "area_population", "cbsa_title", "metro_name"],
+    "QCTDesignation": [
+      "designation_id", "designation_year", "is_designated", "qct_trigger_criterion",
+      "poverty_rate_at_designation", "income_criterion_ratio", "median_hh_income",
+      "VLIL4_current", "basis_boost_pct", "effective_date", "split_tr_flag",
+      "is_metro_tract", "area_population", "cbsa_code", "fmr_area_code",
+      "county_fips", "state_fips", "source_pk", "hud_notice_ref",
+      "poverty_rate_vintage_minus1", "poverty_rate_vintage_minus2",
+      "income_criterion_ratio_minus1", "income_criterion_ratio_minus2",
+      "poverty_rate_trend_3yr", "poverty_trend_direction", "income_ratio_trend_3yr",
+      "income_estimate_cv", "income_estimate_reliable", "median_hh_income_moe"
+    ],
+    "SDDADesignation": [
+      "designation_id", "designation_year", "is_designated", "fmr_area_code",
+      "area_name", "ranking_ratio", "safmr_2br", "vlil_4person", "total_population",
+      "population_in_qct", "effective_population", "basis_boost_pct", "effective_date",
+      "lihtc_max_rent", "qct_overlap_pct", "zcta_count_designated"
+    ],
+    "NMDDADesignation": [
+      "designation_id", "designation_year", "is_designated", "fmr_area_code",
+      "area_name", "ranking_ratio", "fmr_2br", "vlil_4person", "total_population",
+      "population_in_qct", "effective_population", "basis_boost_pct", "effective_date",
+      "lihtc_max_rent", "qct_overlap_pct", "is_territory"
+    ],
+    "Section8AMILimit": [
+      "limit_id", "hud_fmr_area_code", "area_name", "state", "program_type", "mfi_value",
+      "year", "ami_pct", "limit_1person", "limit_2person", "limit_3person",
+      "limit_4person", "limit_5person", "limit_6person", "limit_7person",
+      "limit_8person", "max_income", "max_rent"
+    ],
+    "SpecialProgramLimit": [
+      "limit_id", "hud_fmr_area_code", "area_name", "state", "program_type", "mfi_value",
+      "year", "limit_1person", "limit_2person", "limit_3person", "limit_4person",
+      "limit_5person", "limit_6person", "limit_7person", "limit_8person", "max_income"
+    ],
+    "StateAMILimit": [
+      "limit_id", "state", "program_type", "state_mfi", "year", "ami_pct",
+      "limit_1person", "limit_2person", "limit_3person", "limit_4person",
+      "limit_5person", "limit_6person", "limit_7person", "limit_8person",
+      "max_income", "max_rent"
+    ],
+    "LenderBehaviorRisk": [
+      "risk_id", "msa_code", "assessment_year", "cbsa_code", "total_applications",
+      "total_originated", "total_denied", "multifamily_applications", "multifamily_denied",
+      "avg_loan_amount", "gse_sold_pct", "denial_rate_overall",
+      "denial_rate_minority", "denial_rate_white", "multifamily_denial_rate",
+      "denial_rate_disparity_ratio", "fair_lending_risk_score", "risk_tier",
+      "top_denial_reason", "is_high_disparity", "is_multifamily_constrained"
+    ]
+  },
+  "property_schemas": {
+    "State": {
+      "state_fips":  {"neo4j_type": "STRING", "padding": "zfill(2)", "description": "2-digit state FIPS code", "example": "48"},
+      "state_abbr":  {"neo4j_type": "STRING", "description": "2-letter state abbreviation", "example": "TX"},
+      "state_name":  {"neo4j_type": "STRING", "description": "Full state name", "example": "Texas"}
+    },
+    "County": {
+      "county_fips":  {"neo4j_type": "STRING", "padding": "zfill(5)", "description": "5-digit county FIPS code", "example": "48113"},
+      "state_fips":   {"neo4j_type": "STRING", "padding": "zfill(2)", "description": "2-digit state FIPS code", "example": "48"},
+      "county_name":  {"neo4j_type": "STRING", "nullable": true, "description": "County name as loaded from census reference", "example": "Dallas County"}
+    },
+    "CensusTract": {
+      "fips_code":    {"neo4j_type": "STRING", "padding": "zfill(11)", "description": "11-digit census tract FIPS code", "example": "48113017819"},
+      "county_fips":  {"neo4j_type": "STRING", "padding": "zfill(5)", "description": "5-digit county FIPS code", "example": "48113"},
+      "state_fips":   {"neo4j_type": "STRING", "padding": "zfill(2)", "description": "2-digit state FIPS code", "example": "48"},
+      "cbsa_code":    {"neo4j_type": "STRING", "nullable": true, "quirk": "has float artifact suffix like '33860.0' -- DO NOT filter on this field; use IN_METRO relationship instead"},
+      "fmr_area_code":{"neo4j_type": "STRING", "nullable": true, "description": "HUD FMR area code", "example": "METRO33860M33860"},
+      "is_metro":     {"neo4j_type": "BOOLEAN", "description": "True if tract is in a metropolitan FMR area", "comparison": "ct.is_metro = true"}
+    },
+    "MetroArea": {
+      "cbsa_code":    {"neo4j_type": "STRING", "padding": "zfill(5)", "description": "5-digit CBSA code", "example": "19100"},
+      "fmr_area_code":{"neo4j_type": "STRING", "description": "HUD FMR area code", "example": "METRO19100M19100"},
+      "state_fips":   {"neo4j_type": "STRING", "padding": "zfill(2)", "nullable": true},
+      "area_population":{"neo4j_type": "INTEGER", "nullable": true},
+      "cbsa_title":   {"neo4j_type": "STRING", "nullable": true, "quirk": "NULL for most nodes -- use SDDADesignation.area_name for human-readable metro name instead"}
+    },
+    "QCTDesignation": {
+      "designation_id":              {"neo4j_type": "STRING", "description": "Unique key: {tract_fips}_{year}", "example": "48113017819_2025"},
+      "designation_year":            {"neo4j_type": "INTEGER", "description": "Year of designation", "example": 2025, "comparison": "q.designation_year = $year (integer, never quoted)"},
+      "is_designated":               {"neo4j_type": "BOOLEAN", "values": [true, false], "comparison": "q.is_designated = true", "quirk": "BOOLEAN stored as true/false -- use q.is_designated = true, never COALESCE(q,0)=1"},
+      "qct_trigger_criterion":       {"neo4j_type": "STRING", "values": ["poverty_rate", "income_ratio", "none"]},
+      "poverty_rate_at_designation": {"neo4j_type": "FLOAT", "range": "0.0-1.0", "description": "Tract poverty rate at designation"},
+      "income_criterion_ratio":      {"neo4j_type": "FLOAT", "description": "Tract median income / area VLIL threshold"},
+      "median_hh_income":            {"neo4j_type": "FLOAT", "description": "ACS tract median household income (dollars)"},
+      "VLIL4_current":               {"neo4j_type": "INTEGER", "description": "Very Low Income Limit for 4-person household"},
+      "basis_boost_pct":             {"neo4j_type": "INTEGER", "values": [0, 30], "comparison": "q.basis_boost_pct = 30"},
+      "effective_date":              {"neo4j_type": "STRING", "format": "YYYY-MM-DD"},
+      "split_tr_flag":               {"neo4j_type": "BOOLEAN"},
+      "is_metro_tract":              {"neo4j_type": "BOOLEAN"},
+      "area_population":             {"neo4j_type": "INTEGER", "nullable": true},
+      "cbsa_code":                   {"neo4j_type": "STRING", "padding": "zfill(5)", "nullable": true},
+      "fmr_area_code":               {"neo4j_type": "STRING", "nullable": true},
+      "county_fips":                 {"neo4j_type": "STRING", "padding": "zfill(5)"},
+      "state_fips":                  {"neo4j_type": "STRING", "padding": "zfill(2)"},
+      "poverty_rate_vintage_minus1": {"neo4j_type": "FLOAT", "range": "0.0-1.0", "nullable": true},
+      "poverty_rate_vintage_minus2": {"neo4j_type": "FLOAT", "range": "0.0-1.0", "nullable": true},
+      "income_criterion_ratio_minus1":{"neo4j_type": "FLOAT", "nullable": true},
+      "income_criterion_ratio_minus2":{"neo4j_type": "FLOAT", "nullable": true},
+      "poverty_rate_trend_3yr":      {"neo4j_type": "FLOAT", "nullable": true},
+      "poverty_trend_direction":     {"neo4j_type": "STRING", "values": ["improving", "worsening", "stable"], "nullable": true},
+      "income_ratio_trend_3yr":      {"neo4j_type": "FLOAT", "nullable": true},
+      "income_estimate_cv":          {"neo4j_type": "FLOAT", "nullable": true},
+      "income_estimate_reliable":    {"neo4j_type": "BOOLEAN", "nullable": true},
+      "median_hh_income_moe":        {"neo4j_type": "FLOAT", "nullable": true},
+      "hud_notice_ref":              {"neo4j_type": "STRING", "nullable": true},
+      "source_pk":                   {"neo4j_type": "STRING"}
+    },
+    "SDDADesignation": {
+      "designation_id":    {"neo4j_type": "STRING", "description": "Unique key: {fmr_area_code}_{year}", "example": "METRO10380M10380_2025"},
+      "designation_year":  {"neo4j_type": "INTEGER", "comparison": "s.designation_year = $year (integer)"},
+      "is_designated":     {"neo4j_type": "BOOLEAN", "values": [true, false], "comparison": "s.is_designated = true"},
+      "fmr_area_code":     {"neo4j_type": "STRING"},
+      "area_name":         {"neo4j_type": "STRING", "description": "Human-readable MSA name", "example": "Dallas-Fort Worth-Arlington, TX MSA"},
+      "ranking_ratio":     {"neo4j_type": "FLOAT", "description": "SAFMR-to-VLIL ratio"},
+      "safmr_2br":         {"neo4j_type": "INTEGER", "description": "Small Area FMR for 2-bedroom (dollars)"},
+      "vlil_4person":      {"neo4j_type": "INTEGER", "description": "Very Low Income Limit for 4-person household"},
+      "total_population":  {"neo4j_type": "INTEGER", "nullable": true},
+      "population_in_qct": {"neo4j_type": "INTEGER", "nullable": true},
+      "effective_population":{"neo4j_type": "INTEGER", "nullable": true},
+      "zcta_count_designated":{"neo4j_type": "INTEGER", "nullable": true},
+      "basis_boost_pct":   {"neo4j_type": "INTEGER", "values": [30]},
+      "effective_date":    {"neo4j_type": "STRING", "format": "YYYY-MM-DD"},
+      "lihtc_max_rent":    {"neo4j_type": "FLOAT", "description": "Max LIHTC rent = vlil_4person * 0.03"},
+      "qct_overlap_pct":   {"neo4j_type": "FLOAT", "range": "0.0-1.0"}
+    },
+    "NMDDADesignation": {
+      "designation_id":    {"neo4j_type": "STRING", "description": "Unique key: {county_fips}_{year}", "example": "66010_2025"},
+      "designation_year":  {"neo4j_type": "INTEGER", "comparison": "n.designation_year = $year (integer)"},
+      "is_designated":     {"neo4j_type": "BOOLEAN", "values": [true, false], "comparison": "n.is_designated = true"},
+      "fmr_area_code":     {"neo4j_type": "STRING"},
+      "area_name":         {"neo4j_type": "STRING", "description": "County or territory name as in HUD source"},
+      "ranking_ratio":     {"neo4j_type": "FLOAT"},
+      "fmr_2br":           {"neo4j_type": "INTEGER", "nullable": true},
+      "vlil_4person":      {"neo4j_type": "INTEGER"},
+      "total_population":  {"neo4j_type": "INTEGER", "nullable": true},
+      "population_in_qct": {"neo4j_type": "INTEGER", "nullable": true},
+      "effective_population":{"neo4j_type": "INTEGER", "nullable": true},
+      "basis_boost_pct":   {"neo4j_type": "INTEGER", "values": [30]},
+      "is_territory":      {"neo4j_type": "BOOLEAN"},
+      "effective_date":    {"neo4j_type": "STRING", "format": "YYYY-MM-DD"},
+      "lihtc_max_rent":    {"neo4j_type": "FLOAT"},
+      "qct_overlap_pct":   {"neo4j_type": "FLOAT", "range": "0.0-1.0"}
+    },
+    "Section8AMILimit": {
+      "limit_id":          {"neo4j_type": "STRING", "description": "Unique key: {hud_fmr_area_code}_{year}_{program_type}", "example": "METRO10180M10180_2025_VLI"},
+      "hud_fmr_area_code": {"neo4j_type": "STRING", "description": "HUD FMR area code (was area_code before Fix 7)", "example": "METRO10180M10180"},
+      "area_name":         {"neo4j_type": "STRING"},
+      "state":             {"neo4j_type": "STRING", "padding": "zfill(2)"},
+      "program_type":      {"neo4j_type": "STRING", "values": ["ELI", "VLI", "LI"]},
+      "mfi_value":         {"neo4j_type": "INTEGER"},
+      "year":              {"neo4j_type": "INTEGER", "comparison": "a.year = $year (integer)"},
+      "ami_pct":           {"neo4j_type": "INTEGER", "values": [30, 50, 80]},
+      "limit_1person":     {"neo4j_type": "INTEGER"},
+      "limit_2person":     {"neo4j_type": "INTEGER"},
+      "limit_3person":     {"neo4j_type": "INTEGER"},
+      "limit_4person":     {"neo4j_type": "INTEGER"},
+      "limit_5person":     {"neo4j_type": "INTEGER"},
+      "limit_6person":     {"neo4j_type": "INTEGER"},
+      "limit_7person":     {"neo4j_type": "INTEGER"},
+      "limit_8person":     {"neo4j_type": "INTEGER"},
+      "max_income":        {"neo4j_type": "INTEGER", "description": "= limit_4person"},
+      "max_rent":          {"neo4j_type": "FLOAT", "nullable": true, "description": "= limit_4person * 0.03; None except for VLI program_type"}
+    },
+    "SpecialProgramLimit": {
+      "limit_id":          {"neo4j_type": "STRING", "description": "Unique key: {hud_fmr_area_code}_{year}_{program_type}"},
+      "hud_fmr_area_code": {"neo4j_type": "STRING"},
+      "area_name":         {"neo4j_type": "STRING"},
+      "state":             {"neo4j_type": "STRING", "padding": "zfill(2)"},
+      "program_type":      {"neo4j_type": "STRING", "values": ["SEC221_BMIR", "SEC235", "SEC236"]},
+      "mfi_value":         {"neo4j_type": "INTEGER"},
+      "year":              {"neo4j_type": "INTEGER"},
+      "limit_1person":     {"neo4j_type": "INTEGER"},
+      "limit_2person":     {"neo4j_type": "INTEGER"},
+      "limit_3person":     {"neo4j_type": "INTEGER"},
+      "limit_4person":     {"neo4j_type": "INTEGER"},
+      "limit_5person":     {"neo4j_type": "INTEGER"},
+      "limit_6person":     {"neo4j_type": "INTEGER"},
+      "limit_7person":     {"neo4j_type": "INTEGER"},
+      "limit_8person":     {"neo4j_type": "INTEGER"},
+      "max_income":        {"neo4j_type": "INTEGER"}
+    },
+    "StateAMILimit": {
+      "limit_id":      {"neo4j_type": "STRING", "description": "Unique key: {state_fips}_{year}_{program_type}", "example": "48_2025_VLI"},
+      "state":         {"neo4j_type": "STRING", "padding": "zfill(2)"},
+      "program_type":  {"neo4j_type": "STRING", "values": ["ELI", "VLI", "LI"]},
+      "state_mfi":     {"neo4j_type": "INTEGER"},
+      "year":          {"neo4j_type": "INTEGER", "comparison": "s.year = $year (integer)"},
+      "ami_pct":       {"neo4j_type": "INTEGER", "values": [30, 50, 80]},
+      "limit_1person": {"neo4j_type": "INTEGER"},
+      "limit_2person": {"neo4j_type": "INTEGER"},
+      "limit_3person": {"neo4j_type": "INTEGER"},
+      "limit_4person": {"neo4j_type": "INTEGER"},
+      "limit_5person": {"neo4j_type": "INTEGER"},
+      "limit_6person": {"neo4j_type": "INTEGER"},
+      "limit_7person": {"neo4j_type": "INTEGER"},
+      "limit_8person": {"neo4j_type": "INTEGER"},
+      "max_income":    {"neo4j_type": "INTEGER"},
+      "max_rent":      {"neo4j_type": "FLOAT", "nullable": true}
+    },
+    "LenderBehaviorRisk": {
+      "risk_id":                    {"neo4j_type": "STRING", "description": "Unique key: {cbsa_code}_{assessment_year}", "example": "19100_2025"},
+      "cbsa_code":                  {"neo4j_type": "STRING", "padding": "zfill(5)", "nullable": true},
+      "assessment_year":            {"neo4j_type": "STRING", "quirk": "STRING not integer -- compare with toString($year) or a string literal like '2025'", "example": "\"2025\""},
+      "msa_code":                   {"neo4j_type": "STRING", "quirk": "Always 'NA' -- not a usable FIPS; use APPLIES_TO->MetroArea instead"},
+      "total_applications":         {"neo4j_type": "INTEGER"},
+      "total_originated":           {"neo4j_type": "INTEGER"},
+      "total_denied":               {"neo4j_type": "INTEGER"},
+      "multifamily_applications":   {"neo4j_type": "INTEGER"},
+      "multifamily_denied":         {"neo4j_type": "INTEGER"},
+      "avg_loan_amount":            {"neo4j_type": "FLOAT"},
+      "gse_sold_pct":               {"neo4j_type": "FLOAT", "range": "0.0-1.0"},
+      "denial_rate_overall":        {"neo4j_type": "FLOAT", "range": "0.0-1.0"},
+      "denial_rate_minority":       {"neo4j_type": "FLOAT", "range": "0.0-1.0", "nullable": true},
+      "denial_rate_white":          {"neo4j_type": "FLOAT", "range": "0.0-1.0", "nullable": true},
+      "multifamily_denial_rate":    {"neo4j_type": "FLOAT", "range": "0.0-1.0", "nullable": true},
+      "denial_rate_disparity_ratio":{"neo4j_type": "FLOAT", "nullable": true, "description": "minority_rate / white_rate"},
+      "fair_lending_risk_score":    {"neo4j_type": "FLOAT", "nullable": true},
+      "risk_tier":                  {"neo4j_type": "STRING", "values": ["low", "moderate", "elevated", "high", "unknown"]},
+      "top_denial_reason":          {"neo4j_type": "STRING", "nullable": true},
+      "is_high_disparity":          {"neo4j_type": "BOOLEAN", "description": "True if disparity_ratio > 2.0"},
+      "is_multifamily_constrained": {"neo4j_type": "BOOLEAN"}
+    }
+  },
+  "normalisation_rules": {
+    "description": "Silver layer normalisation applied before Neo4j ingest. Use these rules when constructing filters or interpreting raw values.",
+    "zero_padding": {
+      "fips_code":    "zfill(11) -- 11-digit census tract",
+      "county_fips":  "zfill(5)  -- 5-digit county",
+      "state_fips":   "zfill(2)  -- 2-digit state",
+      "state":        "zfill(2)  -- same as state_fips",
+      "cbsa_code":    "strip .0 float artifact then zfill(5)",
+      "zcta_code":    "zfill(5)"
+    },
+    "sentinel_to_null": {
+      "cbsa_code": ["100000", "100000.0"],
+      "all_string_fields": ["", "nan", "NA", "None"]
+    },
+    "neo4j_type_map": {
+      "INTEGER_fields": [
+        "designation_year", "year", "basis_boost_pct", "ami_pct", "mfi_value", "state_mfi",
+        "max_income", "limit_1person", "limit_2person", "limit_3person", "limit_4person",
+        "limit_5person", "limit_6person", "limit_7person", "limit_8person",
+        "total_applications", "total_originated", "total_denied",
+        "multifamily_applications", "multifamily_denied",
+        "area_population", "total_population", "population_in_qct", "effective_population",
+        "VLIL4_current", "safmr_2br", "vlil_4person", "fmr_2br",
+        "median_hh_income", "zcta_count_designated"
+      ],
+      "FLOAT_fields": [
+        "poverty_rate_at_designation", "poverty_rate_vintage_minus1", "poverty_rate_vintage_minus2",
+        "income_criterion_ratio", "income_criterion_ratio_minus1", "income_criterion_ratio_minus2",
+        "poverty_rate_trend_3yr", "income_ratio_trend_3yr", "income_estimate_cv",
+        "median_hh_income_moe", "ranking_ratio", "qct_overlap_pct",
+        "lihtc_max_rent", "max_rent",
+        "denial_rate_overall", "denial_rate_minority", "denial_rate_white",
+        "multifamily_denial_rate", "denial_rate_disparity_ratio",
+        "fair_lending_risk_score", "gse_sold_pct", "avg_loan_amount"
+      ],
+      "BOOLEAN_fields": [
+        "is_designated", "is_metro", "split_tr_flag", "is_metro_tract", "income_estimate_reliable",
+        "is_territory", "is_high_disparity", "is_multifamily_constrained"
+      ],
+      "BOOLEAN_fields_note": {
+        "QCTDesignation.is_designated":  "BOOLEAN true/false -- use q.is_designated = true",
+        "SDDADesignation.is_designated": "BOOLEAN true/false -- use s.is_designated = true",
+        "NMDDADesignation.is_designated":"BOOLEAN true/false -- use n.is_designated = true"
+      }
+    }
+  },
+  "relationship_patterns": [
+    {"type": "IN_STATE",    "from": "County",            "to": "State",            "note": "3235 edges"},
+    {"type": "IN_STATE",    "from": "MetroArea",         "to": "State",            "note": "441 edges"},
+    {"type": "IN_STATE",    "from": "CensusTract",       "to": "State"},
+    {"type": "IN_COUNTY",   "from": "CensusTract",       "to": "County",           "note": "85385 edges"},
+    {"type": "IN_METRO",    "from": "CensusTract",       "to": "MetroArea",        "note": "88194 edges"},
+    {"type": "IN_METRO",    "from": "County",            "to": "MetroArea",        "note": "3194 edges"},
+    {"type": "APPLIES_TO",  "from": "QCTDesignation",    "to": "CensusTract",      "via_field": "tract_fips"},
+    {"type": "APPLIES_TO",  "from": "SDDADesignation",   "to": "MetroArea",        "via_field": "fmr_area_code"},
+    {"type": "APPLIES_TO",  "from": "NMDDADesignation",  "to": "County",           "via_field": "county_fips"},
+    {"type": "APPLIES_TO",  "from": "StateAMILimit",     "to": "State",            "via_field": "state"},
+    {"type": "APPLIES_TO",  "from": "LenderBehaviorRisk","to": "MetroArea",        "via_field": "cbsa_code"},
+    {"type": "HAS_MSA_AMI", "from": "County",            "to": "Section8AMILimit", "via_crosswalk": "hud_fmr_area_code"},
+    {"type": "HAS_STATE_AMI","from": "County",           "to": "StateAMILimit",    "via_field": "state"}
+  ],
+  "quirks": [
+    "The graph contains BOTH designated (is_designated=true) AND non-designated (is_designated=false) rows on all designation types. Non-designated rows represent tracts/areas HUD evaluated but did not select. Always filter with x.is_designated = true.",
+    "basis_boost_pct is INTEGER with values 0 or 30. Never compare to '30%'. Use: x.basis_boost_pct = 30.",
+    "CensusTract.county_fips is a 5-digit STRING (e.g. '48113'). CensusTract.fips_code is an 11-digit STRING (e.g. '48113017819'). Never confuse these.",
+    "County has no cbsa_code property. To resolve a county by name convert it to county_fips. Examples: Dallas TX=48113, Travis TX=48453, LA CA=06037, Cook IL=17031.",
+    "To filter tracts by county use CensusTract.county_fips directly: MATCH (ct:CensusTract {county_fips: $county_fips}). Do NOT traverse through a County node just to filter by county.",
+    "MetroArea.cbsa_title is NULL for almost all nodes. For a human-readable metro name use SDDADesignation.area_name or NMDDADesignation.area_name instead.",
+    "For point-in-time designation checks use designation_year = $year (equality). Do NOT use designation_year <= $year.",
+    "Section8AMILimit and StateAMILimit are WIDE FORMAT -- all 8 household size limits (limit_1person through limit_8person) are columns on a single row. bedroom_count does not exist. max_rent is a direct column.",
+    "LenderBehaviorRisk DEDUPLICATION -- some MetroArea nodes have multiple LenderBehaviorRisk records (one per Metropolitan Division). Deduplicate by ORDER BY r.total_applications DESC LIMIT 1 for single-year queries.",
+    "HMDA trend queries: match LenderBehaviorRisk via MetroArea directly -- MATCH (m:MetroArea {cbsa_code: $cbsa_code})<-[:APPLIES_TO]-(r:LenderBehaviorRisk). Do not start from CensusTract.",
+    "DDA means BOTH SDDADesignation (metro, via CensusTract-[:IN_METRO]->MetroArea) AND NMDDADesignation (non-metro, via CensusTract-[:IN_COUNTY]->County). Always check both. A metro tract will never match NMDDADesignation; a rural tract will never match SDDADesignation.",
+    "program_type for Section8AMILimit and StateAMILimit: ELI (30% AMI), VLI (50% AMI), LI (80% AMI).",
+    "denial_rate_disparity_ratio = denial_rate_minority / denial_rate_white. is_high_disparity = true when disparity_ratio > 2.0. risk_tier: low (<0.75), moderate (0.75-1.0), elevated (1.0-1.5), high (>1.5)."
+  ]
+}

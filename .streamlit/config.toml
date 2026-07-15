@@ -1,0 +1,3 @@
+[server]
+# Disable file watcher -- prevents stale .pyc reloads that cause ImportError on Windows
+fileWatcherType = "none"

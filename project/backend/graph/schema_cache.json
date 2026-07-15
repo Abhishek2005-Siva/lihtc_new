@@ -1,0 +1,103 @@
+{
+  "labels": [
+    "State",
+    "County",
+    "CensusTract",
+    "MetroArea",
+    "QCTDesignation",
+    "SDDADesignation",
+    "NMDDADesignation",
+    "Section8AMILimit",
+    "SpecialProgramLimit",
+    "StateAMILimit",
+    "LenderBehaviorRisk"
+  ],
+  "relationship_types": [
+    "IN_STATE",
+    "IN_COUNTY",
+    "IN_METRO",
+    "APPLIES_TO",
+    "HAS_MSA_AMI",
+    "HAS_STATE_AMI"
+  ],
+  "properties_by_label": {
+    "State": ["state_fips", "state_abbr", "state_name"],
+    "County": ["county_fips", "state_fips"],
+    "CensusTract": ["fips_code", "state_fips", "county_fips", "cbsa_code", "fmr_area_code", "is_metro"],
+    "MetroArea": ["cbsa_code", "fmr_area_code", "state_fips", "area_population", "cbsa_title"],
+    "QCTDesignation": ["designation_id", "designation_year", "is_designated", "qct_trigger_criterion", "poverty_rate_at_designation", "income_criterion_ratio", "median_hh_income", "VLIL4_current", "basis_boost_pct", "effective_date", "split_tr_flag", "is_metro_tract", "area_population", "cbsa_code", "fmr_area_code", "county_fips", "state_fips", "source_pk", "hud_notice_ref", "poverty_rate_vintage_minus1", "poverty_rate_vintage_minus2", "income_criterion_ratio_minus1", "income_criterion_ratio_minus2", "poverty_rate_trend_3yr", "poverty_trend_direction", "income_ratio_trend_3yr", "income_estimate_cv", "income_estimate_reliable", "median_hh_income_moe"],
+    "SDDADesignation": ["designation_id", "designation_year", "is_designated", "fmr_area_code", "area_name", "ranking_ratio", "safmr_2br", "vlil_4person", "total_population", "population_in_qct", "effective_population", "basis_boost_pct", "effective_date", "lihtc_max_rent", "qct_overlap_pct", "zcta_count_designated"],
+    "NMDDADesignation": ["designation_id", "designation_year", "is_designated", "county_fips", "fmr_area_code", "area_name", "ranking_ratio", "fmr_2br", "vlil_4person", "total_population", "population_in_qct", "effective_population", "basis_boost_pct", "effective_date", "lihtc_max_rent", "qct_overlap_pct", "is_territory"],
+    "Section8AMILimit": ["limit_id", "area_code", "area_name", "state", "program_type", "mfi_value", "year", "ami_pct", "limit_1person", "limit_2person", "limit_3person", "limit_4person", "limit_5person", "limit_6person", "limit_7person", "limit_8person", "max_income", "max_rent"],
+    "SpecialProgramLimit": ["limit_id", "area_name", "state", "program_type", "mfi_value", "year", "ami_pct", "limit_1person", "limit_2person", "limit_3person", "limit_4person", "limit_5person", "limit_6person", "limit_7person", "limit_8person", "max_income"],
+    "StateAMILimit": ["limit_id", "state", "program_type", "state_mfi", "year", "ami_pct", "limit_1person", "limit_2person", "limit_3person", "limit_4person", "limit_5person", "limit_6person", "limit_7person", "limit_8person", "max_income", "max_rent"],
+    "LenderBehaviorRisk": ["risk_id", "msa_code", "assessment_year", "cbsa_code", "total_applications", "total_originated", "total_denied", "multifamily_applications", "multifamily_denied", "lender_count", "avg_loan_amount", "gse_sold_pct", "denial_rate_overall", "denial_rate_minority", "denial_rate_white", "multifamily_denial_rate", "denial_rate_disparity_ratio", "fair_lending_risk_score", "risk_tier", "top_denial_reason", "is_high_disparity", "is_multifamily_constrained"]
+  },
+  "relationship_patterns": [
+    {"type": "IN_STATE", "from": "County", "to": "State", "description": "County belongs to this state"},
+    {"type": "IN_STATE", "from": "MetroArea", "to": "State", "description": "Metro area's primary state"},
+    {"type": "IN_STATE", "from": "CensusTract", "to": "State", "description": "Tract belongs to this state"},
+    {"type": "IN_COUNTY", "from": "CensusTract", "to": "County", "description": "Tract is within this county"},
+    {"type": "IN_METRO", "from": "CensusTract", "to": "MetroArea", "description": "Tract is within this metro area"},
+    {"type": "IN_METRO", "from": "County", "to": "MetroArea", "description": "County is within this metro area"},
+    {"type": "APPLIES_TO", "from": "QCTDesignation", "to": "CensusTract", "description": "QCT status for this tract-year"},
+    {"type": "APPLIES_TO", "from": "SDDADesignation", "to": "MetroArea", "description": "SDDA designation for this metro-year"},
+    {"type": "APPLIES_TO", "from": "NMDDADesignation", "to": "County", "description": "Non-metro DDA for this county-year"},
+    {"type": "APPLIES_TO", "from": "StateAMILimit", "to": "State", "description": "State AMI limit anchored to this state"},
+    {"type": "APPLIES_TO", "from": "LenderBehaviorRisk", "to": "MetroArea", "description": "Metro HMDA risk"},
+    {"type": "APPLIES_TO", "from": "LenderBehaviorRisk", "to": "County", "description": "Non-metro county HMDA risk"},
+    {"type": "HAS_MSA_AMI", "from": "County", "to": "Section8AMILimit", "description": "County's HUD area AMI limit"},
+    {"type": "HAS_STATE_AMI", "from": "County", "to": "StateAMILimit", "description": "Non-metro county fallback to state AMI"}
+  ],
+  "primary_keys": {
+    "State": "state_fips",
+    "County": "county_fips",
+    "CensusTract": "fips_code",
+    "MetroArea": "cbsa_code",
+    "QCTDesignation": "designation_id",
+    "SDDADesignation": "designation_id",
+    "NMDDADesignation": "designation_id",
+    "Section8AMILimit": "limit_id",
+    "SpecialProgramLimit": "limit_id",
+    "StateAMILimit": "limit_id",
+    "LenderBehaviorRisk": "risk_id"
+  },
+  "indexes": [
+    {"label": "Section8AMILimit", "property": "area_code", "purpose": "Fast HAS_MSA_AMI edge traversal"}
+  ],
+  "quirks": [
+    "LenderBehaviorRisk.assessment_year is a STRING; compare with toString($year) or string params.",
+    "Section8AMILimit.area_code uses HUD FMR formats like METRO19100M19100 and NCNTY48113N48113, not raw CBSA codes.",
+    "LenderBehaviorRisk.msa_code is actually county FIPS; cbsa_code is the true CBSA field.",
+    "County has no county_name property.",
+    "MetroArea has cbsa_title, not metro_name.",
+    "SpecialProgramLimit intentionally has no relationships.",
+    "Use HAS_MSA_AMI for both metro and non-metro HUD area limits; use HAS_STATE_AMI only as fallback."
+  ],
+  "concepts": {
+    "qct_status": {
+      "entities": ["QCTDesignation", "CensusTract"],
+      "path": "(q:QCTDesignation)-[:APPLIES_TO]->(t:CensusTract)",
+      "filters": ["t.fips_code", "q.designation_year"],
+      "key_outputs": ["q.is_designated", "q.qct_trigger_criterion", "q.poverty_rate_at_designation", "q.income_criterion_ratio", "q.basis_boost_pct"]
+    },
+    "dda_status": {
+      "entities": ["CensusTract", "MetroArea", "County", "SDDADesignation", "NMDDADesignation"],
+      "paths": ["(t:CensusTract)-[:IN_METRO]->(m:MetroArea)<-[:APPLIES_TO]-(sd:SDDADesignation)", "(t:CensusTract)-[:IN_COUNTY]->(c:County)<-[:APPLIES_TO]-(nd:NMDDADesignation)"],
+      "filters": ["t.fips_code", "designation_year"],
+      "key_outputs": ["is_designated", "ranking_ratio", "basis_boost_pct", "area_name"]
+    },
+    "ami_limits": {
+      "entities": ["CensusTract", "County", "Section8AMILimit", "StateAMILimit"],
+      "paths": ["(t:CensusTract)-[:IN_COUNTY]->(c:County)-[:HAS_MSA_AMI]->(a:Section8AMILimit)", "(t:CensusTract)-[:IN_COUNTY]->(c:County)-[:HAS_STATE_AMI]->(a:StateAMILimit)"],
+      "filters": ["t.fips_code", "a.year", "a.program_type"],
+      "key_outputs": ["limit_1person through limit_8person", "max_income", "max_rent", "ami_pct"]
+    },
+    "hmda_risk": {
+      "entities": ["CensusTract", "MetroArea", "County", "LenderBehaviorRisk"],
+      "paths": ["(t:CensusTract)-[:IN_METRO]->(m:MetroArea)<-[:APPLIES_TO]-(r:LenderBehaviorRisk)", "(t:CensusTract)-[:IN_COUNTY]->(c:County)<-[:APPLIES_TO]-(r:LenderBehaviorRisk)"],
+      "filters": ["t.fips_code", "r.assessment_year"],
+      "key_outputs": ["risk_tier", "denial_rate_overall", "denial_rate_minority", "denial_rate_white", "denial_rate_disparity_ratio", "lender_count", "avg_loan_amount"]
+    }
+  }
+}

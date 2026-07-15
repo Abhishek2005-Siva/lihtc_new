@@ -1,0 +1,7 @@
+neo4j
+streamlit
+pydantic
+python-dotenv
+openai
+numpy
+

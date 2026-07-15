@@ -1,0 +1,133 @@
+# ── QCT ──────────────────────────────────────────────────────────────────────
+# Columns that never change across years.  Year-varying columns (pov_rate_NN,
+# inc_factor_NN, B19013*_NN, VLIL_*_NN, tract_id_NN, cbsasub[NN]) are resolved
+# at runtime by resolve_qct_columns().
+
+qct_static_keep_columns:
+  - state
+  - stcnty
+  - qct_id
+  - cbsa
+  - metro
+  - Area_Pop
+  - qct
+  - split_tr
+  # P1/P5/H1 and their 2022 Census aliases (p0010001/p0420001/p0150001) are
+  # resolved dynamically by resolve_qct_columns() and must NOT be listed here.
+
+qct_column_map:
+  state:    state_fips
+  statefp:  state_fips    # 2003-2006 legacy
+  stcnty:   county_fips
+  qct_id:   source_pk
+  cbsa:     cbsa_code
+  metro:    is_metro_tract
+  metrotct: is_metro_tract  # 2003-2006 legacy
+  Area_Pop: area_population
+  areapop:  area_population  # pre-2013 legacy
+  qct:      is_designated
+  split_tr: split_tr_flag
+  splittr:  split_tr_flag  # pre-2013 legacy
+  # Year-varying columns resolved by resolve_qct_columns()
+
+qct_required:
+  - tract_fips
+  - county_fips
+  - state_fips
+  - is_designated
+  - income_criterion_ratio
+  - poverty_rate_at_designation
+
+qct_fingerprint_fields:
+  - designation_id
+  - source_pk
+  - tract_fips
+  - county_fips
+  - state_fips
+  - cbsa_code
+  - fmr_area_code
+  - is_metro_tract
+  - split_tr_flag
+  - designation_year
+  - is_designated
+  - hud_notice_ref
+  - basis_boost_pct
+  - qct_trigger_criterion
+  - poverty_rate_at_designation
+  - poverty_rate_vintage_minus1
+  - poverty_rate_vintage_minus2
+  - median_hh_income
+  - median_hh_income_moe
+  - VLIL4_current
+  - income_criterion_ratio
+  - income_criterion_ratio_minus1
+  - income_criterion_ratio_minus2
+  - area_population
+  - poverty_rate_trend_3yr
+  - poverty_trend_direction
+  - income_ratio_trend_3yr
+  - income_estimate_cv
+  - income_estimate_reliable
+  - effective_date
+  # ci_spans_income_threshold is a Gold-layer field (needs AMI cutoff)
+
+# ── DDA ──────────────────────────────────────────────────────────────────────
+# Stable columns shared across metro and nonmetro sheets and across years.
+# Year-varying columns (QCT population ref year, FMR/SAFMR vintage, VLIL vintage,
+# designation flag column) are resolved by resolve_dda_*_columns().
+
+dda_stable_column_map:
+  cbsasub:   fmr_area_code
+  CBSAsub:   fmr_area_code
+  areaname:  area_name
+  Area Name: area_name
+  # Total population — census vintage varies by year
+  2010 Decennial Census ZCTA Population: total_population   # 2022 metro
+  2010 Decennial Census Population:      total_population   # 2018-2021 nonmetro
+  2020 Decennial Census ZCTA Population: total_population   # 2023+ metro
+  2020 Decennial Census:                 total_population   # 2023+ nonmetro
+  pop2010:                               total_population   # 2022 nonmetro
+  Cumulative Population:                 cumulative_pop
+  Cumulative Percentage Population:      cumulative_pct
+  Percent Cumulative Population:         cumulative_pct
+  Percentage Cumulative Population:      cumulative_pct     # 2020 nonmetro variant
+  LIHTC Maximum Rent (1/12 of 30% of 120% of VLIL): lihtc_max_rent_hud
+  DDA Ranking Ratio (FMR/LIHTC Maximum Rent):       ranking_ratio
+  SDDA Ranking Ratio (SAFMR/LIHTC Maximum Rent):    ranking_ratio
+
+dda_metro_fingerprint_fields:
+  - zcta_code
+  - fmr_area_code
+  - area_name
+  - area_type
+  - total_population
+  - population_in_qct
+  - effective_population
+  - safmr_2br
+  - vlil_4person
+  - lihtc_max_rent
+  - ranking_ratio
+  - is_designated
+  - designation_year
+  - rent_metric_type
+  - is_territory
+  - qct_overlap_pct
+
+
+dda_nonmetro_fingerprint_fields:
+  - county_fips
+  - fmr_area_code
+  - area_name
+  - area_type
+  - total_population
+  - population_in_qct
+  - effective_population
+  - fmr_2br
+  - vlil_4person
+  - lihtc_max_rent
+  - ranking_ratio
+  - is_designated
+  - designation_year
+  - rent_metric_type
+  - is_territory
+  - qct_overlap_pct

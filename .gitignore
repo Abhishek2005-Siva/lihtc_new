@@ -1,0 +1,19 @@
+# Secrets
+.env
+*.env.local
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+backend/graph/schema_cache.json
+
+# Large / regenerable data
+bronze_files/
+gold/
+graph_state.db
+
+# OS
+.DS_Store
+Thumbs.db

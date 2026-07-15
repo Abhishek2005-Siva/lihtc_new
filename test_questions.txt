@@ -1,0 +1,112 @@
+==============================================================================
+LIHTC GRAPH AGENT — TEST QUESTIONS
+All answers verified directly against Neo4j graph data.
+==============================================================================
+
+------------------------------------------------------------------------------
+CATEGORY 1: QCT DESIGNATION LOOKUP
+------------------------------------------------------------------------------
+
+Q1. Is census tract 19113000213 a QCT in 2025?
+    EXPECTED: Yes — designated in 2025, trigger criterion: income.
+
+Q2. Was census tract 19113000213 a QCT in 2024?
+    EXPECTED: No — is_designated = 0 for 2024.
+
+Q3. Is census tract 19113000213 a QCT in 2025 but not in 2024?
+    EXPECTED: Yes in 2025, No in 2024. Tests year-comparison decomposition.
+
+Q4. Has census tract 01073010500 been consistently designated as a QCT from 2020 to 2025?
+    EXPECTED: Yes — is_designated = 1 for all 6 years (2020–2025).
+    Poverty rates: 2020: 27.7%, 2021: 26.8%, 2022: 21.3%, 2023: 22.6%, 2025: 20.7%.
+
+Q5. When did census tract 01005950300 lose its QCT designation?
+    EXPECTED: Designated in 2022 (both) and 2023 (income). Lost designation in 2024 (is_designated=0).
+    Poverty at 2023 designation: 24.1%. Poverty at 2024: 17.8% (below threshold).
+
+------------------------------------------------------------------------------
+CATEGORY 2: DUAL DESIGNATION (QCT + DDA)
+------------------------------------------------------------------------------
+
+Q6. Is census tract 01001020700 eligible for the 30% basis boost in 2025?   
+    EXPECTED: Yes — it is both QCT designated (trigger: income) and located in
+    Montgomery, AL MSA which is an SDDA in 2025. Both carry basis_boost_pct = 30.
+
+Q7. Is census tract 01001020700 in a Difficult Development Area in 2025?
+    EXPECTED: Yes — its metro area (Montgomery, AL MSA) is an SDDA designation
+    for 2025 with basis_boost_pct = 30.
+
+------------------------------------------------------------------------------
+CATEGORY 3: SEARCH / BULK QUERIES
+------------------------------------------------------------------------------
+
+    Q8. Show me all QCT designated tracts in Dallas County (county FIPS 48113) for 2025 
+        where the poverty rate is above 25%.
+    EXPECTED: 47 tracts match. Tests search path and COALESCE(is_designated,0)=1 filter.
+
+Q9. How many census tracts in Alabama (state FIPS 01) were QCT designated in 2025?
+    EXPECTED: Agent should count QCTDesignation nodes with state_fips="01",
+    designation_year=2025, COALESCE(is_designated,0)=1.
+
+------------------------------------------------------------------------------
+CATEGORY 4: AMI LIMITS
+------------------------------------------------------------------------------
+
+Q10. What is the VLI income limit for a 4-person household in Dallas County, TX for 2025?
+     EXPECTED: $58,650 (Section8AMILimit, area: "Dallas, TX HUD Metro FMR Area").
+
+Q11. What is the maximum allowable IRC §42 gross rent for a LIHTC unit in Dallas County
+     TX for 2025 under the VLI program?
+     EXPECTED: $1,466/month (= $58,650 × 30% ÷ 12, rounded).
+
+Q12. What are the VLI income limits by household size for Dallas County TX in 2025?
+     EXPECTED: From Section8AMILimit — 1-person: $41,100, 4-person: $58,650.
+     Area: "Dallas, TX HUD Metro FMR Area".
+
+------------------------------------------------------------------------------
+CATEGORY 5: HMDA LENDING RISK
+------------------------------------------------------------------------------
+
+Q13. What is the HMDA lending risk tier for CBSA 40140 in 2024?
+     EXPECTED: Two Metropolitan Division records exist. The high-disparity MD has:
+     risk_tier = "high", denial_rate_disparity_ratio = 8.19, total_applications = 79,907,
+     denial_rate_minority = 14.1%, denial_rate_white = 1.7%.
+
+Q14. Which CBSA had the highest minority-to-white denial rate disparity in 2024?
+     EXPECTED: CBSA 40140 (disparity ratio 8.19) ranks first among loaded data.
+     Tests ORDER BY DESC on denial_rate_disparity_ratio.
+
+------------------------------------------------------------------------------
+CATEGORY 6: SDDA / NMDDA
+------------------------------------------------------------------------------
+
+Q15. Is the Akron, OH MSA a Difficult Development Area in 2025?
+     EXPECTED: Yes — SDDADesignation for fmr_area_code "METRO10420M10420",
+     area_name "Akron, OH MSA", is_designated=1, basis_boost_pct=30, safmr_2br=$1,970.
+
+Q16. Is the Albany, OR MSA a Difficult Development Area in 2025?
+     EXPECTED: Yes — SDDADesignation for fmr_area_code "METRO10540M10540",
+     is_designated=1, basis_boost_pct=30, safmr_2br=$2,030.
+
+------------------------------------------------------------------------------
+CATEGORY 7: META / MULTI-STEP REASONING
+------------------------------------------------------------------------------
+
+Q17. For census tract 01001020700 in 2025, what is the basis boost percentage and
+     what qualifies it — QCT, DDA, or both?
+     EXPECTED: Both QCT (income trigger) and SDDA (Montgomery, AL MSA). Boost = 30%.
+
+Q18. Compare the QCT designation status of tract 01005950300 in 2023 versus 2025.
+     EXPECTED: 2023 = designated (income, poverty 24.1%). 2025 = not designated
+     (poverty 21.6%, below threshold). Dedesignated between 2023 and 2024.
+
+==============================================================================
+DATA NOTES
+==============================================================================
+- QCT data in graph: 2003–2025 (all years loaded).
+- AMI data in graph: 2025 only (Section8AMILimit, StateAMILimit).
+- DDA data in graph: 2025 only (SDDADesignation, NMDDADesignation).
+- HMDA data in graph: 2024 (LenderBehaviorRisk, assessment_year stored as STRING).
+- County nodes have no name — resolve county names to county_fips in Cypher.
+- QCTDesignation.is_designated is INTEGER — use COALESCE(q.is_designated,0)=1.
+==============================================================================
