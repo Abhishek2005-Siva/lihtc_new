@@ -9,6 +9,7 @@ truth for execution — nothing here is pre-validated against an external dict.
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -69,11 +70,69 @@ CYPHER DON'TS:
   - Never add a MATCH, OPTIONAL MATCH, or WHERE condition for an attribute the question
     never mentions. Every filter condition must trace back to something the question
     actually asked about — no "helpful" extra filters.
+    This has happened concretely: for "is this tract eligible for the 30% basis boost",
+    the question asks ONLY about basis_boost_pct — it does NOT mention poverty rate.
+    basis_boost_pct is an ALREADY-DERIVED field: HUD sets it to 30 if EITHER the poverty
+    rate criterion OR the income ratio criterion was met (see qct_trigger_criterion).
+    Do NOT additionally filter on poverty_rate_at_designation or income_criterion_ratio
+    for a basis-boost eligibility question — that re-derives eligibility from only ONE
+    of the possible trigger criteria and wrongly excludes tracts that qualified via the
+    OTHER one. Filter/check basis_boost_pct directly; nothing else.
   - Never re-declare the same variable in a second MATCH/OPTIONAL MATCH with a NEW
     label or property map once it is already bound (e.g. matching (q:QCTDesignation)
     once, then later writing another OPTIONAL MATCH (q:QCTDesignation) again). Bind
     each variable exactly once. If you need another condition on it, add a WHERE
     clause referencing the existing variable — do not re-MATCH it.
+  - Never write a MATCH or OPTIONAL MATCH clause INSIDE a WHERE's parentheses (e.g.
+    "WHERE (a.x = $y OPTIONAL MATCH (b)-[:REL]->(c)) AND (...)"). MATCH/OPTIONAL
+    MATCH are always separate, top-level clauses on their own line — never nested
+    inside a WHERE condition. If you need a second pattern to check a second
+    condition, write it as its own OPTIONAL MATCH clause before the WHERE, then
+    reference both variables in one WHERE with AND.
+  - Never reference an alias defined via "AS" elsewhere in the SAME RETURN clause
+    (e.g. "RETURN x AS foo, CASE WHEN y THEN foo ELSE z END AS bar" — "foo" is not
+    yet defined when "bar" is being computed; each RETURN expression must be
+    self-contained). If you need to reuse a computed value in a later expression,
+    bind it with WITH first, then reference it afterward.
+  - EVERY MATCH/OPTIONAL MATCH after the first MUST connect to an already-matched
+    variable via a relationship arrow (-[:REL]-> or <-[:REL]-). Never write a second,
+    independent MATCH for a different node type with no arrow joining it to what
+    you already matched — even for the simplest single-entity lookup, and even if
+    you intend to filter by a shared property like county_fips or state_fips instead.
+    Two separately-matched node sets with no relationship between them is a
+    CARTESIAN PRODUCT: Neo4j pairs every row from one set with every row from the
+    other, silently returning data for entities that have nothing to do with each
+    other. This is the single most severe bug class in this system — worse than a
+    syntax error, because the query runs "successfully" and returns wrong data.
+    WRONG: MATCH (ct:CensusTract {fips_code: $fips_code})
+           MATCH (q:QCTDesignation {designation_year: $year, is_designated: true})
+    RIGHT: MATCH (ct:CensusTract {fips_code: $fips_code})
+           OPTIONAL MATCH (q:QCTDesignation)-[:APPLIES_TO]->(ct)
+           WHERE q.designation_year = $year AND q.is_designated = true
+    Before writing a second MATCH, check RELEVANT RELATIONSHIPS in the schema above
+    for the correct relationship type and direction connecting the two labels.
+  - NEVER invent a value for an opaque identifier code (cbsa_code, fmr_area_code,
+    hud_fmr_area_code, msa_code, designation_id) unless that EXACT code is stated
+    literally in the question. These are HUD/Census numeric codes with no
+    derivable relationship to a place name — you cannot correctly guess Dallas's
+    cbsa_code from "Dallas County TX" the way you can derive a county_fips from a
+    well-known county. If the question only gives a place NAME (county, metro,
+    tract) and you need to reach a node that's keyed by one of these opaque codes,
+    MATCH the named entity first and traverse the relationship to the target node
+    — do NOT add a property filter on the opaque code itself.
+    WRONG: MATCH (m:MetroArea {cbsa_code: $cbsa_code}) -- $cbsa_code is a guess
+    RIGHT: MATCH (c:County {county_fips: $county_fips})-[:IN_METRO]->(m:MetroArea)
+           -- m is now resolved correctly with no need to know its cbsa_code
+  - This applies to ANY identifier, not just opaque codes: if the question only
+    names a BROADER geography (a county, a metro area) and gives no specific
+    tract, do NOT invent a tract-level identifier by reusing the broader one —
+    a county_fips (5 digits) is NEVER equal to a fips_code (11 digits), even
+    for a tract "in" that county. Anchor the query on whichever entity the
+    question ACTUALLY names (County, MetroArea, ...) and traverse from there;
+    only match CensusTract when the question gives a real tract identifier.
+    WRONG: question says "Cook County IL" (no tract) →
+           MATCH (ct:CensusTract {fips_code: $county_fips}) -- fabricated, matches nothing
+    RIGHT: MATCH (co:County {county_fips: $county_fips}) -- anchor on what's named
 
 CRITICAL: OPTIONAL MATCH + WHERE DOES NOT FILTER OUT ROWS.
   A WHERE clause written directly after OPTIONAL MATCH only decides which candidate
@@ -141,7 +200,7 @@ _BOOLEAN_FIELDS = (
     "is_designated", "is_high_disparity", "is_metro_tract", "is_metro",
     "is_territory", "is_multifamily_constrained", "split_tr_flag",
 )
-_INTEGER_FIELDS = ("designation_year", "basis_boost_pct", "ami_pct")
+_INTEGER_FIELDS = ("designation_year", "basis_boost_pct", "ami_pct", "assessment_year")
 _BARE_MAP_RE = re.compile(
     r"\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?!\$)(?!true\b)(?!false\b)(?!null\b)"
     r"([A-Za-z_][A-Za-z0-9_]*)\s*\}"
@@ -163,6 +222,40 @@ _NODE_RE = re.compile(
 _REL_ARROW_RE = re.compile(
     r"(<-|-)\s*\[\s*(?:[A-Za-z_][A-Za-z0-9_]*)?\s*:\s*([A-Za-z_][A-Za-z0-9_]*)[^\]]*\]\s*(->|-)"
 )
+
+# Fallback for when the LLM ignores "output ONLY JSON" and instead writes a prose
+# explanation with the Cypher in its own ```cypher fenced block and the params in
+# a separate ```json block that has no "cypher" key at all. Confirmed via a 29-
+# question diagnostic run to be the single most common cause of a build attempt
+# failing outright (~38% of first attempts, spread across every tool — a response-
+# shape failure, not tied to any specific question's content).
+_FENCED_CYPHER_RE = re.compile(r"```(?:cypher|sql)?\s*\n(.*?)```", re.IGNORECASE | re.DOTALL)
+_JSON_OBJECT_RE = re.compile(r"\{(?:[^{}]|\{[^{}]*\})*\}", re.DOTALL)
+
+
+def _extract_fenced_fallback(raw: str) -> dict[str, Any] | None:
+    """Reconstruct {"cypher": ..., "params": ...} from a prose response that
+    contains a fenced Cypher block plus a separate fenced/bare JSON params block,
+    instead of relying on the model to self-correct a formatting instruction it
+    has already ignored once. Returns None if no Cypher-shaped fenced block is
+    found — callers should treat that as a genuine parse failure, not silently
+    swallow it.
+    """
+    cypher_m = _FENCED_CYPHER_RE.search(raw)
+    if not cypher_m:
+        return None
+    cypher = cypher_m.group(1).strip()
+    if not cypher or "MATCH" not in cypher.upper():
+        return None
+
+    for m in _JSON_OBJECT_RE.finditer(raw[cypher_m.end():]):
+        try:
+            candidate = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict) and "cypher" not in candidate:
+            return {"cypher": cypher, "params": candidate, "explanation": ""}
+    return {"cypher": cypher, "params": {}, "explanation": ""}
 
 
 def _fix_relationship_direction(
@@ -243,9 +336,13 @@ def _post_process(cypher: str, params: dict[str, Any], ontology=None) -> str:
     for f in _INTEGER_FIELDS:
         cypher = re.sub(rf"({f}\s*=\s*)['\"](\d+)['\"]", r"\g<1>\2", cypher)
 
+    # assessment_year is INTEGER in the live data (confirmed — it was previously
+    # misdocumented as STRING). Unwrap any toString(...) the model still wraps it
+    # in from that stale assumption — comparing an INTEGER to a STRING silently
+    # matches zero rows, no error at all.
     cypher = re.sub(
-        r"assessment_year\s*=\s*\$year(?![_A-Za-z0-9])",
-        "assessment_year = toString($year)", cypher,
+        r"assessment_year\s*=\s*toString\(([^()]+)\)",
+        r"assessment_year = \1", cypher, flags=re.IGNORECASE,
     )
 
     # Auto-parameterize any literal the LLM embedded directly instead of using
@@ -315,7 +412,11 @@ def _post_process(cypher: str, params: dict[str, Any], ontology=None) -> str:
 
 
 def _fix_clause_order(cypher: str) -> str:
-    order_m = re.search(r"\bORDER\s+BY\s+.+?(?=\s*(?:SKIP|LIMIT|$))", cypher,
+    # \b...\b around SKIP/LIMIT is required: without it, "LIMIT" matches
+    # case-insensitively as a bare substring of property names like
+    # "limit_4person" (very common in this schema — AMI limit fields), truncating
+    # the ORDER BY capture right after the first such reference (e.g. "ORDER BY s.").
+    order_m = re.search(r"\bORDER\s+BY\s+.+?(?=\s*(?:\bSKIP\b|\bLIMIT\b|$))", cypher,
                         re.IGNORECASE | re.DOTALL)
     skip_m  = re.search(r"\bSKIP\s+\S+",  cypher, re.IGNORECASE)
     limit_m = re.search(r"\bLIMIT\s+\S+", cypher, re.IGNORECASE)
@@ -403,14 +504,45 @@ class CypherBuilder:
             ],
             label=f"CypherBuilder:{tool_name}" + (" [retry]" if error else ""),
         )
-        data = parse_json_object(raw)
+        try:
+            data = parse_json_object(raw)
+        except (ValueError, json.JSONDecodeError):
+            data = None
+
+        # The model sometimes answers with prose + a fenced ```cypher block instead
+        # of the required bare JSON — parse_json_object then either raises (data is
+        # None) or, worse, silently succeeds on a stray {...} it found (e.g. the
+        # params-only JSON block) leaving "cypher" missing/empty. Recover from both.
+        if not data or (not data.get("cypher") and not data.get("insufficient_params")):
+            fallback = _extract_fenced_fallback(raw)
+            if fallback is not None:
+                data = fallback
+            elif data is None:
+                raise ValueError(
+                    f"Could not parse Cypher from LLM response: {raw[:300]!r}"
+                )
 
         missing = data.get("insufficient_params")
         if missing:
             raise InsufficientParamsError(missing)
 
+        raw_params = data.get("params", {})
+        # The model occasionally double-wraps its params, e.g. emitting
+        # {"params": {"fips_code": "...", "year": 2025}} as the "params" value
+        # instead of the flat dict directly — most often alongside the fenced-
+        # block prose failure above, where the model's own ```json block IS
+        # {"params": {...}}. Unwrap one level in that specific, unambiguous shape
+        # (a single "params" key whose value is itself a dict — no real schema
+        # property is ever named "params", so this is never a legitimate field).
+        if (
+            isinstance(raw_params, dict)
+            and set(raw_params.keys()) == {"params"}
+            and isinstance(raw_params["params"], dict)
+        ):
+            raw_params = raw_params["params"]
+
         exec_params: dict[str, Any] = {
-            k: v for k, v in data.get("params", {}).items() if v is not None
+            k: v for k, v in raw_params.items() if v is not None
         }
 
         cypher = _post_process(data.get("cypher", "").strip(), exec_params, ontology)

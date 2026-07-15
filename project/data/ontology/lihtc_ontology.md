@@ -5,7 +5,7 @@ This ontology is for dynamic Cypher generation. The agent should use only the la
 ## Anchor Nodes
 
 - `State(state_fips, state_abbr, state_name)`
-- `County(county_fips, state_fips)`
+- `County(county_fips, state_fips, county_name)`
 - `CensusTract(fips_code, state_fips, county_fips, cbsa_code, fmr_area_code, is_metro)`
 - `MetroArea(cbsa_code, fmr_area_code, state_fips, area_population, cbsa_title)`
 
@@ -41,8 +41,8 @@ This ontology is for dynamic Cypher generation. The agent should use only the la
 - Use `CensusTract.fips_code` for 11-digit tract lookup.
 - Use `QCTDesignation.designation_year`, `SDDADesignation.designation_year`, and `NMDDADesignation.designation_year` for designation-year filters.
 - Use `Section8AMILimit.year` and `StateAMILimit.year` for AMI-year filters.
-- Use `LenderBehaviorRisk.assessment_year` as a string.
-- Do not use `County.county_name`; it does not exist.
+- `LenderBehaviorRisk.assessment_year` is an INTEGER (e.g. `2025`), not a string.
+- `County.county_name` exists (e.g. `'Cook County'`) — use it to resolve a NAMED county instead of guessing county_fips from memory; only use a bare county_fips param when the question states the digit code directly.
 - Do not use `MetroArea.metro_name`; use `cbsa_title`.
 - For AMI, try county `HAS_MSA_AMI` first and `HAS_STATE_AMI` as fallback.
 - For HMDA, metro tracts can connect through `IN_METRO`; non-metro risk can connect through `IN_COUNTY`.

@@ -1,6 +1,6 @@
 """Tool registry — definitions for all tools in the LIHTC knowledge graph.
 
-Each Tool carries only what's needed for schema extraction and PathPlanner routing.
+Each Tool carries only what's needed for schema extraction and Orchestrator routing.
 The CypherBuilder LLM derives the query pattern from the schema, relationships,
 type constraints, and the general rules in its system prompt — reading values
 directly from the user's question rather than a pre-extracted params dict.
@@ -21,12 +21,35 @@ class Tool:
 
 TOOLS: dict[str, Tool] = {
 
+    "resolve_geography": Tool(
+        name="resolve_geography",
+        description=(
+            "Resolve a NAMED place (county name, state name/abbreviation, or metro "
+            "area name) to its FIPS/CBSA code by looking it up in the graph — never "
+            "guess a code from memory. Use this as a FIRST step, with a later step's "
+            "depends_on pointing at it, whenever the question names a county, state, "
+            "or metro area WITHOUT giving its digit code directly, and the real tool "
+            "needed to answer the question requires that code as a parameter. Returns "
+            "county_fips and/or state_fips and/or cbsa_code plus the matched name, so "
+            "the next step can use the resolved value instead of guessing. Do NOT use "
+            "this if the question already states a digit FIPS code directly, or if "
+            "the question names a specific tract (11-digit fips_code) — tract-level "
+            "identifiers must come from the question text itself, never resolved "
+            "this way."
+        ),
+        node_labels=["County", "State", "MetroArea"],
+    ),
+
     "check_qct": Tool(
         name="check_qct",
         description=(
-            "Check QCT designation status for a specific tract and year. "
+            "Check QCT designation status for a specific tract and a SINGLE year. "
             "Returns is_designated flag, basis_boost_pct, trigger criterion, "
-            "poverty_rate_at_designation, and income_criterion_ratio."
+            "poverty_rate_at_designation, and income_criterion_ratio. "
+            "This checks exactly ONE year — it does not accept a year range. If the "
+            "question asks about multiple discrete years for the same tract (e.g. "
+            "'in 2025 and 2024', 'in 2025 but not 2024'), use ONE check_qct step PER "
+            "YEAR, not a single call — do not try to widen the year filter to cover both."
         ),
         node_labels=["CensusTract", "QCTDesignation"],
     ),
@@ -34,10 +57,17 @@ TOOLS: dict[str, Tool] = {
     "check_dda": Tool(
         name="check_dda",
         description=(
-            "Check DDA status for a specific tract and year. "
-            "Checks BOTH metro DDA (SDDADesignation via MetroArea) and non-metro DDA "
-            "(NMDDADesignation via County). Returns is_dda_designated, basis_boost_pct, "
-            "sdda_area_name, nmdda_area_name."
+            "Check DDA status for a year, anchored on whichever geography the "
+            "question actually gives a CODE for — a specific tract (11-digit "
+            "fips_code, always taken from the question text itself), OR a county "
+            "(5-digit county_fips), OR nothing tract-specific at all (anchor "
+            "directly on County — no CensusTract needed). REQUIRES county_fips "
+            "already resolved to its digit code — if the question only NAMES a "
+            "county (e.g. 'Cook County IL') without stating that code, call "
+            "resolve_geography FIRST and depends_on it; do not guess the code "
+            "yourself. Checks BOTH metro DDA (SDDADesignation via MetroArea) and "
+            "non-metro DDA (NMDDADesignation via County). Returns is_dda_designated, "
+            "basis_boost_pct, sdda_area_name, nmdda_area_name."
         ),
         node_labels=["CensusTract", "MetroArea", "County", "SDDADesignation", "NMDDADesignation"],
     ),
@@ -45,9 +75,12 @@ TOOLS: dict[str, Tool] = {
     "get_ami_limits": Tool(
         name="get_ami_limits",
         description=(
-            "Get Section 8 AMI income limits for the county containing a tract. "
-            "Returns all 8 household-size limits (limit_1person..limit_8person) and max_rent. "
-            "program_type: VLI (50% AMI, default), ELI (30% AMI), LI (80% AMI)."
+            "Get Section 8 AMI income limits for the county containing a tract, or "
+            "for a county directly. Returns all 8 household-size limits "
+            "(limit_1person..limit_8person) and max_rent. program_type: VLI (50% AMI, "
+            "default), ELI (30% AMI), LI (80% AMI). REQUIRES county_fips already "
+            "resolved — if the question only NAMES a county without a digit code, "
+            "call resolve_geography FIRST and depends_on it."
         ),
         node_labels=["CensusTract", "County", "Section8AMILimit"],
     ),
@@ -76,7 +109,10 @@ TOOLS: dict[str, Tool] = {
             "Search census tracts by geography (county_fips or state_fips) and designation filters. "
             "is_qct_designated=true returns only QCT-designated tracts. "
             "is_dda_designated=true returns only DDA-designated tracts. "
-            "Omitting both returns all tracts with their designation status."
+            "Omitting both returns all tracts with their designation status. "
+            "REQUIRES county_fips/state_fips already resolved to digit codes — if "
+            "the question only NAMES a county or state, call resolve_geography "
+            "FIRST and depends_on it."
         ),
         node_labels=["CensusTract", "QCTDesignation", "SDDADesignation",
                      "NMDDADesignation", "MetroArea", "County"],
@@ -86,7 +122,9 @@ TOOLS: dict[str, Tool] = {
         name="search_dda_areas",
         description=(
             "Find all DDA areas (metro SDDAs and non-metro NMDDAs) for a given year, "
-            "optionally filtered by state. Returns area names and basis boost percentages."
+            "optionally filtered by state. Returns area names and basis boost percentages. "
+            "REQUIRES state_fips already resolved — if the question only NAMES/"
+            "abbreviates a state, call resolve_geography FIRST and depends_on it."
         ),
         node_labels=["SDDADesignation", "NMDDADesignation", "MetroArea", "County", "State"],
     ),
@@ -95,7 +133,9 @@ TOOLS: dict[str, Tool] = {
         name="search_hmda_risk",
         description=(
             "Find metro areas by HMDA fair lending risk for a given year. "
-            "Optionally filter by risk_tier or state_fips."
+            "Optionally filter by risk_tier or state_fips. REQUIRES state_fips "
+            "already resolved — if the question only NAMES/abbreviates a state, "
+            "call resolve_geography FIRST and depends_on it."
         ),
         node_labels=["LenderBehaviorRisk", "MetroArea", "State"],
     ),
@@ -108,7 +148,9 @@ TOOLS: dict[str, Tool] = {
             "question explicitly asks for a state's AMI limit, or wants a statewide "
             "figure to compare against a local one. Returns all 8 household-size "
             "limits (limit_1person..limit_8person), max_rent, and program_type "
-            "(ELI=30%, VLI=50%, LI=80% AMI)."
+            "(ELI=30%, VLI=50%, LI=80% AMI). REQUIRES state_fips already resolved — "
+            "if the question only NAMES/abbreviates a state, call resolve_geography "
+            "FIRST and depends_on it."
         ),
         node_labels=["State", "County", "CensusTract", "StateAMILimit"],
     ),
@@ -120,7 +162,9 @@ TOOLS: dict[str, Tool] = {
             "Section 236) — NOT the standard Section 8 VLI/ELI/LI tiers. This node type "
             "has NO relationship to CensusTract/County in the graph — match it directly "
             "by its own hud_fmr_area_code, area_name, or state property, not via a tract "
-            "traversal. Returns all 8 household-size limits and max_income."
+            "traversal. Returns all 8 household-size limits and max_income. If filtering "
+            "by state, REQUIRES the 2-digit state_fips already resolved — if the question "
+            "only NAMES/abbreviates a state, call resolve_geography FIRST and depends_on it."
         ),
         node_labels=["SpecialProgramLimit"],
     ),
@@ -219,7 +263,7 @@ def build_schema_context(tool_name: str, ontology) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Prompt block shown to PathPlanner — tool names + descriptions only
+# Prompt block shown to Orchestrator — tool names + descriptions only
 # ---------------------------------------------------------------------------
 
 def tools_prompt_block() -> str:

@@ -16,7 +16,7 @@ from backend.utils.normalizer import Normalizer
 from backend.pipeline.executor import Executor
 from backend.cache.tool_cache import ToolCache
 from backend.agents.cypher_builder import CypherBuilder
-from backend.agents.path_planner import PathPlanner
+from backend.agents.orchestrator import Orchestrator
 from backend.agents.synthesizer import Synthesizer
 from backend.graph.neo4j_client import Neo4jClient
 from backend.graph.ontology import GraphOntology
@@ -52,8 +52,11 @@ def _render_sidebar() -> None:
         st.title("LIHTC Agent")
         st.divider()
 
+        if "api_key" not in st.session_state:
+            st.session_state["api_key"] = load_settings().nvidia_api_key or ""
+
         api_key = st.text_input("NVIDIA API Key", type="password",
-                                value=st.session_state.get("api_key", ""))
+                                value=st.session_state["api_key"])
         if api_key:
             st.session_state["api_key"] = api_key
 
@@ -138,7 +141,7 @@ def _run_pipeline(question: str, ctx: ConversationContext) -> None:
     # Fresh ToolCache every question — no caching carries over between turns,
     # so one question's results can never leak into another's.
     executor = Executor(
-        path_planner    = PathPlanner(fast_llm),
+        orchestrator    = Orchestrator(fast_llm),
         cypher_builder  = CypherBuilder(fast_llm),
         validator       = CypherValidatorAgent(fast_llm, ontology),
         synthesizer     = Synthesizer(synth_llm),
@@ -149,95 +152,57 @@ def _run_pipeline(question: str, ctx: ConversationContext) -> None:
     )
 
     try:
-        plan_placeholder   = st.empty()
-        trace_container    = st.container()
-        synth_placeholder  = st.empty()
+        plan_placeholder = st.empty()
+        steps_container  = st.container()
 
-        stage_status = st.status("Running pipeline...", expanded=True)
+        # Steps re-fire (once on execution, once again after validation) for the
+        # SAME StepRecord object — key placeholders on object identity so each
+        # step renders as one card that updates in place, not duplicates.
+        step_placeholders: dict[int, tuple[int, "st.delta_generator.DeltaGenerator", list]] = {}
+        step_counter = {"n": 0}
+        pending_attempts: list[dict] = []
 
         def on_stage(stage: str, data):
-            with stage_status:
-                if stage == "normalize":
-                    st.write("Normalizing question...")
-                elif stage == "plan":
-                    st.write("Planning execution paths...")
-                elif stage == "planned":
-                    st.write(f"Plan ready — goal: **{data.end_goal}** · "
-                             f"{len(data.paths)} path(s), selected: **{data.selected_path}**")
-                    with plan_placeholder.expander(
-                        f"Execution plan — {len(data.paths)} paths · selected: {data.selected_path}",
-                        expanded=False,
-                    ):
-                        for path in data.paths:
-                            label = "✓ " if path.id == data.selected_path else "  "
-                            st.markdown(f"**{label}{path.id}** — {path.description}")
-                            for j, step in enumerate(path.steps, 1):
-                                dep = f" (depends on {step.depends_on})" if step.depends_on else ""
-                                st.caption(f"  Step {j}: {step.tool}{dep}")
-                elif stage == "synthesize":
-                    st.write("Synthesizing answer...")
+            if stage == "planned":
+                with plan_placeholder.expander(
+                    f"Plan — goal: {data.end_goal} · {len(data.steps)} step(s)",
+                    expanded=False,
+                ):
+                    for j, step in enumerate(data.steps, 1):
+                        dep = f" (depends on {step.depends_on})" if step.depends_on else ""
+                        st.caption(f"Step {j}: {step.tool}{dep}")
 
         def on_attempt(tool_name, attempt_num, cypher, rows, error):
-            with trace_container:
-                if error:
-                    st.caption(f"↳ {tool_name} attempt {attempt_num}: ❌ {error}")
-                else:
-                    st.caption(f"↳ {tool_name} attempt {attempt_num}: ✓ {len(rows or [])} row(s)")
-                if cypher:
-                    with st.expander(f"Cypher (attempt {attempt_num})", expanded=False):
-                        st.code(cypher, language="cypher")
+            pending_attempts.append({
+                "attempt": attempt_num, "cypher": cypher, "rows": rows, "error": error,
+            })
 
         def on_step(record):
-            badge_color = "#c0392b" if record.error else "#1a7f3c"
-            badge_text  = "ERROR" if record.error else f"{record.row_count} row(s)"
-            cached      = " [cached]" if record.cypher == "[cached]" else ""
-            with trace_container:
-                st.markdown(
-                    f"**{record.tool}**{cached} "
-                    f"<span style='background:{badge_color}20;color:{badge_color};"
-                    f"padding:2px 8px;border-radius:4px;font-size:0.8rem'>{badge_text}</span>",
-                    unsafe_allow_html=True,
-                )
-                col1, col2 = st.columns([1, 2])
-                with col1:
-                    st.json(record.params)
-                if record.cypher and record.cypher != "[cached]":
-                    with col2:
-                        st.code(_inline_params(record.cypher, record.params), language="cypher")
-                if record.error:
-                    st.error(record.error)
-                elif record.rows:
-                    st.json(record.rows[:5])
-                    if record.validation_score is not None:
-                        score = record.validation_score
-                        color = "#1a7f3c" if score >= 0.7 else "#c0392b"
-                        st.markdown(
-                            f"<span style='color:{color};font-size:0.8rem'>"
-                            f"Relevance score: {score:.0%} — {record.validation_reason}</span>",
-                            unsafe_allow_html=True,
-                        )
-                else:
-                    st.warning("No rows returned.")
-                st.divider()
-            with stage_status:
-                st.write(f"✓ {record.tool} — {badge_text}{cached}")
+            key = id(record)
+            if key not in step_placeholders:
+                step_counter["n"] += 1
+                attempts_snapshot = list(pending_attempts)
+                pending_attempts.clear()
+                with steps_container:
+                    placeholder = st.empty()
+                step_placeholders[key] = (step_counter["n"], placeholder, attempts_snapshot)
+            n, placeholder, attempts_snapshot = step_placeholders[key]
+            with placeholder.container():
+                _render_step_card(n, record, attempts_snapshot)
 
         plan, scratchpad, synthesis = executor.run(
             question,
             on_step=on_step, on_stage=on_stage, on_attempt=on_attempt,
         )
-        stage_status.update(
-            label=f"Done — {len(scratchpad.steps_taken)} step(s), {len(scratchpad.gaps)} gap(s)",
-            state="complete", expanded=False,
-        )
 
         if scratchpad.gaps:
-            with trace_container:
-                st.markdown("**Gaps:**")
+            with st.expander(f"Gaps ({len(scratchpad.gaps)})", expanded=False):
                 for g in scratchpad.gaps:
                     st.caption(f"• {g['tool']}: {g['reason']}")
 
         # ── Synthesis ──────────────────────────────────────────────────────
+        st.divider()
+        st.markdown("#### Final answer")
         _render_synthesis(synthesis.__dict__)
 
         # ── LLM call log ──────────────────────────────────────────────────
@@ -291,6 +256,57 @@ def _inline_params(cypher: str, params: dict) -> str:
     # Mark any remaining $params that had no value as ⚠$param so they're visible
     cypher = re.sub(r"(\$[A-Za-z_][A-Za-z0-9_]*)", r"⚠\1", cypher)
     return cypher
+
+
+def _render_step_card(n: int, record, attempts: list[dict]) -> None:
+    """One step of the pipeline, in the order the user actually wants to read it:
+    1. which tool was picked and with what parameters
+    2. the Cypher that was built from those parameters and executed
+    3. the reasoning (relevance check) and the resulting rows
+    """
+    cached = record.cypher == "[cached]"
+    ok     = not record.error
+
+    with st.container(border=True):
+        header = f"Step {n} · `{record.tool}`"
+        if cached:
+            header += "  🗂️ *served from cache*"
+        st.markdown(f"##### {header}")
+
+        st.markdown("**1 · Tool selected & parameters sent**")
+        st.json(record.params or {}, expanded=True)
+
+        st.markdown("**2 · Query built & executed**")
+        if len(attempts) > 1:
+            with st.expander(f"{len(attempts)} attempt(s) — showing retries before success/failure", expanded=False):
+                for a in attempts[:-1]:
+                    status = f"❌ {a['error']}" if a["error"] else f"✓ {len(a['rows'] or [])} row(s)"
+                    st.caption(f"Attempt {a['attempt']}: {status}")
+                    if a["cypher"]:
+                        st.code(a["cypher"], language="cypher")
+        if cached:
+            st.caption("Identical (tool, params) seen earlier this turn — no new query was run.")
+        elif record.cypher:
+            st.code(_inline_params(record.cypher, record.params), language="cypher")
+        else:
+            st.caption("No query was executed for this step.")
+
+        st.markdown("**3 · Reasoning & results**")
+        if record.error:
+            st.error(record.error)
+        elif not record.rows:
+            st.warning("No rows returned.")
+        else:
+            st.success(f"{record.row_count} row(s) returned")
+            if record.validation_score is not None:
+                score = record.validation_score
+                color = "#1a7f3c" if score >= 0.7 else "#c0392b"
+                st.markdown(
+                    f"<span style='color:{color};font-size:0.85rem'>"
+                    f"Relevance check: {score:.0%} — {record.validation_reason}</span>",
+                    unsafe_allow_html=True,
+                )
+            st.dataframe(record.rows[:10], use_container_width=True)
 
 
 def _render_synthesis(s: dict) -> None:

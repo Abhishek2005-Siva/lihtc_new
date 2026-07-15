@@ -1,7 +1,7 @@
 """Conversation context — chat message log for the UI only.
 
 Each question is answered independently by the pipeline; nothing here feeds
-back into ParamExtractor/PathPlanner/CypherBuilder. This exists purely so the
+back into Orchestrator/CypherBuilder. This exists purely so the
 Streamlit chat window can redraw prior turns.
 """
 from __future__ import annotations

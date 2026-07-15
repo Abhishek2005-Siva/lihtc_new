@@ -1,38 +1,36 @@
 """Executor — orchestrates the full pipeline for one user question.
 
 Pipeline stages:
-  1. Normalize     — deterministic + optional LLM term expansion
-  2. PlanPaths     — Agent 1: PathPlanner (reads the raw question directly)
-  3. ExecutePaths  — for each path, for each step:
+  1. Normalize   — deterministic + optional LLM term expansion
+  2. Plan        — Agent 1: Orchestrator (reads the raw question directly,
+                    produces ONE sequence of tool calls — no fallback paths)
+  3. Execute     — for each step:
        Step 1: build_cypher  — Agent 2: CypherBuilder (extracts values from the
                                 question itself and writes Cypher in one call)
        Step 2: type_check    — deterministic type fixes
        Step 3: execute_query — Neo4j run_read (retries feed error back to builder)
        Step 4: validate_output — Agent: OutputValidator scores relevance post-execution
-  4. Synthesize    — Agent 3: Synthesizer
+  4. Synthesize  — Agent 3: Synthesizer
 
-There is no separate parameter-extraction stage. PathPlanner decides tool
+There is no separate parameter-extraction stage. Orchestrator decides tool
 sequencing from the raw question; CypherBuilder independently re-reads the
 question for every tool call to extract the values it needs. This means the
 tool cache can only be checked once CypherBuilder has produced its own
-params dict, not before — see `_execute_step`.
+params dict, not before — see `run_tool_call`.
 """
 from __future__ import annotations
 
 from typing import Any
 
 from backend.cache.tool_cache import ToolCache
-from backend.pipeline.steps import build_cypher, execute_query, type_check
-from backend.pipeline.steps.build_cypher import InsufficientParamsError
+from backend.pipeline.tool_call import run_tool_call
 from backend.agents.cypher_builder import CypherBuilder
 from backend.agents.cypher_validator_agent import CypherValidatorAgent
-from backend.agents.path_planner import ExecutionPath, PathPlanner, Plan
+from backend.agents.orchestrator import Orchestrator, Plan, PlanStep
 from backend.agents.synthesizer import Synthesizer, SynthesisResult
 from backend.registry.tool_registry import TOOLS
 from backend.utils.normalizer import Normalizer
 from backend.utils.scratchpad import Scratchpad, StepRecord
-
-_MAX_RETRIES = 3
 
 # Row keys that identify a geographic entity, propagated from a step's result
 # into a dependent step's question context (see _extract_geo).
@@ -42,7 +40,7 @@ _GEO_KEYS = ("county_fips", "cbsa_code", "state_fips", "is_metro_tract")
 class Executor:
     def __init__(
         self,
-        path_planner: PathPlanner,
+        orchestrator: Orchestrator,
         cypher_builder: CypherBuilder,
         validator: CypherValidatorAgent,
         synthesizer: Synthesizer,
@@ -51,7 +49,7 @@ class Executor:
         ontology,
         tool_cache: ToolCache | None = None,
     ) -> None:
-        self.path_planner    = path_planner
+        self.orchestrator    = orchestrator
         self.cypher_builder  = cypher_builder
         self.validator       = validator
         self.synthesizer     = synthesizer
@@ -73,9 +71,9 @@ class Executor:
         if on_stage: on_stage("normalize", None)
         norm = self.normalizer.normalize(question)
 
-        # Stage 2 — Plan paths (PathPlanner reads the raw question directly)
+        # Stage 2 — Plan (Orchestrator reads the raw question directly)
         if on_stage: on_stage("plan", None)
-        plan = self.path_planner.plan(norm.text)
+        plan = self.orchestrator.plan(norm.text)
         if on_stage: on_stage("planned", plan)
 
         if plan.clarification_needed:
@@ -89,41 +87,33 @@ class Executor:
             )
             return plan, scratchpad, synthesis
 
-        # Stage 3 — Execute paths in order, stopping as soon as one produces a
-        # passing (validated, confident) observation — no need to burn more LLM
-        # calls and Neo4j round-trips on fallback paths once we already have a
-        # good answer. record_observation() still only accepts passing results
-        # (score >= threshold), so within the path(s) actually run, a weaker
-        # step can never overwrite a better one.
+        # Stage 3 — Execute the planned steps in order
         scratchpad = Scratchpad(question=norm.text, end_goal=plan.end_goal)
-        for path in plan.ordered_paths():
-            success = self._run_path(
-                path, scratchpad,
-                on_step=on_step, on_attempt=on_attempt, question=norm.text,
-            )
-            if success:
-                break
+        self._run_steps(
+            plan.steps, scratchpad,
+            on_step=on_step, on_attempt=on_attempt, question=norm.text,
+        )
 
         # Stage 4 — Synthesize
         if on_stage: on_stage("synthesize", None)
         synthesis = self.synthesizer.synthesize(scratchpad)
         return plan, scratchpad, synthesis
 
-    # ── Path execution ───────────────────────────────────────────────────────
+    # ── Step execution ───────────────────────────────────────────────────────
 
-    def _run_path(
-        self, path: ExecutionPath, scratchpad: Scratchpad,
+    def _run_steps(
+        self, steps: list[PlanStep], scratchpad: Scratchpad,
         on_step=None, on_attempt=None, question: str = "",
-    ) -> bool:
-        """Execute one path. Returns True if it produced useful observations."""
+    ) -> None:
+        """Execute the planned steps in order."""
         step_results: dict[str, list[dict]] = {}
 
-        for i, step in enumerate(path.steps):
+        for i, step in enumerate(steps):
             # Skip steps for tools that don't exist in the registry
             if step.tool not in TOOLS:
                 record = StepRecord(
                     tool=step.tool, params={}, cypher="", rows=[], row_count=0,
-                    error=f"Unknown tool '{step.tool}'", path_id=path.id,
+                    error=f"Unknown tool '{step.tool}'",
                 )
                 scratchpad.add_step(record)
                 scratchpad.add_gap(step.tool, {}, f"Unknown tool '{step.tool}'")
@@ -135,31 +125,44 @@ class Executor:
             # reads the raw question directly, so this is the only channel left
             # for passing a value from one step's output into the next step's input.
             step_question = question
-            if step.depends_on and step.depends_on.startswith("step_"):
-                try:
-                    dep_idx = int(step.depends_on.replace("step_", "")) - 1
-                    dep_step = path.steps[dep_idx]
-                    prior = step_results.get(dep_step.tool, [])
-                    if prior:
-                        geo = _extract_geo(prior[0])
-                        if geo:
-                            step_question += (
-                                "\n\n[Context from a prior step in this plan — "
-                                f"treat these as authoritative extracted values: {geo}]"
-                            )
-                except (ValueError, IndexError):
-                    pass
+            dep_step = None
+            if step.depends_on:
+                if step.depends_on.startswith("step_"):
+                    try:
+                        dep_idx = int(step.depends_on.replace("step_", "")) - 1
+                        dep_step = steps[dep_idx]
+                    except (ValueError, IndexError):
+                        dep_step = None
+                else:
+                    # Model sometimes writes the dependency as a tool NAME instead
+                    # of "step_N" (e.g. "resolve_geography") — fall back to matching
+                    # by tool name among the earlier steps rather than silently
+                    # dropping the whole context hand-off.
+                    for earlier in steps[:i]:
+                        if earlier.tool == step.depends_on:
+                            dep_step = earlier
+                            break
+            if dep_step is not None:
+                prior = step_results.get(dep_step.tool, [])
+                if prior:
+                    geo = _extract_geo(prior[0])
+                    if geo:
+                        step_question += (
+                            "\n\n[Context from a prior step in this plan — "
+                            f"treat these as authoritative extracted values: {geo}]"
+                        )
 
             # Run all execution steps with retries. Tool-cache lookup happens
             # INSIDE this call, once CypherBuilder has produced its own params
             # dict — there's no pre-known params dict to check before the LLM call.
-            rows, cypher, error, exec_params = self._execute_step(
-                step.tool, step_question, on_attempt=on_attempt,
+            rows, cypher, error, exec_params = run_tool_call(
+                self.cypher_builder, self.neo4j, self.tool_cache,
+                step.tool, step_question, self.ontology, on_attempt=on_attempt,
             )
             record = StepRecord(
                 tool=step.tool, params=exec_params, cypher=cypher,
                 rows=rows or [], row_count=len(rows or []),
-                error=error, path_id=path.id,
+                error=error,
             )
             scratchpad.add_step(record)
             if on_step: on_step(record)
@@ -178,13 +181,14 @@ class Executor:
                     step_results[step.tool] = rows
                     self.tool_cache.store(step.tool, exec_params, rows)
                     scratchpad.record_observation(step.tool, rows, validation.score)
-                    # Stop this path here — no point running further steps once we
-                    # already have a confident answer — unless a later step in this
-                    # same path depends on this one's result (a genuine chain, not
-                    # a redundant alternative attempt).
+                    # Stop here — no point running further steps once we already
+                    # have a confident answer — unless a later step depends on
+                    # this one's result (a genuine chain, not a redundant retry).
+                    # A later step may reference this one either as "step_N" or,
+                    # if the model got the format wrong, by this step's tool name.
                     this_step_id = f"step_{i + 1}"
                     depended_on = any(
-                        s.depends_on == this_step_id for s in path.steps[i + 1:]
+                        s.depends_on in (this_step_id, step.tool) for s in steps[i + 1:]
                     )
                     if not depended_on:
                         break
@@ -193,96 +197,6 @@ class Executor:
                         step.tool, exec_params,
                         f"Output mismatch (score {validation.score:.2f}): {validation.reason}",
                     )
-
-        return bool(scratchpad.observations)
-
-    def _execute_step(
-        self, tool_name: str, question: str, on_attempt=None,
-    ) -> tuple[list[dict] | None, str, str | None, dict[str, Any]]:
-        """Build + execute with retry loop. Returns (rows, cypher, error, exec_params).
-
-        on_attempt, if given, fires after each build+execute attempt (before deciding
-        whether to retry) so the caller can show intermediate progress.
-        """
-        cypher = ""
-        exec_params: dict[str, Any] = {}
-        error: str | None = None
-        failed_cypher: str | None = None   # the Cypher from the previous failed attempt
-
-        for attempt in range(1, _MAX_RETRIES + 1):
-            # Step 1 — Build Cypher (feeds previous error + previous Cypher back on retry
-            # so the LLM patches the specific query instead of regenerating blind)
-            try:
-                cypher, exec_params = build_cypher.run(
-                    self.cypher_builder, tool_name, question, self.ontology,
-                    error=error if attempt > 1 else None,
-                    previous_cypher=failed_cypher if attempt > 1 else None,
-                )
-            except InsufficientParamsError as exc:
-                self._attach_exec_result(cypher, None, str(exc))
-                if on_attempt:
-                    on_attempt(tool_name, attempt, cypher, None, str(exc))
-                return None, cypher, str(exc), {}
-            except Exception as exc:
-                gen_error = f"Cypher generation failed: {exc}"
-                self._attach_exec_result(cypher, None, gen_error)
-                if on_attempt:
-                    on_attempt(tool_name, attempt, cypher, None, gen_error)
-                return None, cypher, gen_error, {}
-
-            # Tool cache check — only possible now that CypherBuilder has told us
-            # its own params. Skips a repeat Neo4j round-trip (not the LLM call).
-            cached = self.tool_cache.get(tool_name, exec_params)
-            if cached is not None:
-                self._attach_exec_result(cypher, cached, None)
-                if on_attempt:
-                    on_attempt(tool_name, attempt, cypher, cached, None)
-                return cached, cypher, None, exec_params
-
-            # Step 2 — Type check (deterministic fixes)
-            cypher = type_check.run(cypher)
-
-            # Step 2b — Pre-flight: catch known-bad patterns before hitting Neo4j.
-            # Gives the LLM a precise, actionable fix instead of a raw Cypher
-            # syntax/parameter error it has repeatedly failed to self-correct from.
-            # allowed_params = exec_params keys — the ONLY $params the Cypher may use.
-            preflight_error = type_check.preflight_check(cypher, set(exec_params.keys()))
-            if preflight_error:
-                self._attach_exec_result(cypher, None, preflight_error)
-                if on_attempt:
-                    on_attempt(tool_name, attempt, cypher, None, preflight_error)
-                error = preflight_error
-                failed_cypher = cypher
-                continue
-
-            # Step 3 — Execute; any error feeds back into next attempt
-            rows, exc_str = execute_query.run(self.neo4j, cypher, exec_params)
-            self._attach_exec_result(cypher, rows, exc_str)
-            if on_attempt:
-                on_attempt(tool_name, attempt, cypher, rows, exc_str)
-            if exc_str:
-                error = exc_str
-                failed_cypher = cypher
-                continue
-
-            return rows, cypher, None, exec_params
-
-        return None, cypher, f"Failed after {_MAX_RETRIES} attempts: {error}", exec_params
-
-    def _attach_exec_result(
-        self, cypher: str, rows: list[dict] | None, error: str | None,
-    ) -> None:
-        """Attach the execution outcome to the CypherBuilder's most recent LLMCall
-        record, so the LLM call log can show what running the generated Cypher
-        actually did — right below that call's RESPONSE."""
-        call_log = getattr(self.cypher_builder.llm, "call_log", None)
-        if call_log:
-            call_log[-1].exec_result = {
-                "cypher": cypher,
-                "row_count": len(rows) if rows is not None else 0,
-                "sample": (rows or [])[:5],
-                "error": error,
-            }
 
 
 def _extract_geo(row: dict) -> dict[str, Any]:

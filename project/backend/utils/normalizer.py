@@ -66,7 +66,10 @@ _RULES: list[tuple[str, str, str]] = [
 
     # Common phrasings
     (r"\bmax(?:imum)?\s+rent\b",   "maximum allowable gross rent (max_rent)", "max rent → max_rent"),
-    (r"\bbasis\s+boost\b",         "30% eligible basis boost under IRC Section 42(d)(5)(B)", "basis boost → §42 boost"),
+    # NOTE: replacement deliberately omits "30%" — if the user already wrote
+    # "30% basis boost", a rule that re-adds "30%" produces a duplicated
+    # "30% 30% eligible basis boost..." (a real bug that occurred).
+    (r"\bbasis\s+boost\b",         "eligible basis boost under IRC Section 42(d)(5)(B)", "basis boost → §42 boost"),
     (r"\bboost\s+eligible\b",      "eligible for the 30% basis boost",        "boost eligible → §42 eligible"),
     (r"\bfair\s+lending\b",        "fair lending risk (HMDA denial rate disparity)", "fair lending → HMDA disparity"),
     (r"\blending\s+risk\b",        "lending risk (HMDA denial rates and disparity ratio)", "lending risk → HMDA risk"),

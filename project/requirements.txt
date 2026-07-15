@@ -3,4 +3,5 @@ streamlit
 pydantic
 python-dotenv
 openai
+mcp
 

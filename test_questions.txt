@@ -1,112 +1,77 @@
-==============================================================================
-LIHTC GRAPH AGENT — TEST QUESTIONS
-All answers verified directly against Neo4j graph data.
-==============================================================================
+LIHTC Agent — Test Questions with Verified Ground Truth
+(Ground truth pulled directly from Neo4j via Cypher, not from the agent — see queries run
+during setup. Use these to check whether the app's/MCP's final answer matches reality.)
 
-------------------------------------------------------------------------------
-CATEGORY 1: QCT DESIGNATION LOOKUP
-------------------------------------------------------------------------------
+=== Basic single-tool checks ===
 
-Q1. Is census tract 19113000213 a QCT in 2025?
-    EXPECTED: Yes — designated in 2025, trigger criterion: income.
+1. Is census tract 01001020700 eligible for the 30% basis boost in 2025?
+   ANSWER: Yes. is_designated=True, basis_boost_pct=30, trigger=income,
+   poverty_rate_at_designation=0.216, income_criterion_ratio=0.722.
+   (This is the case that previously produced a wrong "NO" — regression check.)
 
-Q2. Was census tract 19113000213 a QCT in 2024?
-    EXPECTED: No — is_designated = 0 for 2024.
+2. Is Cook County IL a Difficult Development Area in 2025?
+   ANSWER: Yes. Cook County -> Chicago-Naperville-Elgin, IL-IN metro area,
+   SDDADesignation is_designated=True, basis_boost_pct=30.
 
-Q3. Is census tract 19113000213 a QCT in 2025 but not in 2024?
-    EXPECTED: Yes in 2025, No in 2024. Tests year-comparison decomposition.
+3. What is the AMI limit for a 4-person household in Travis County TX for 2025?
+   ANSWER: $66,900 (VLI program, Austin-Round Rock-San Marcos, TX MSA, mfi_value=$133,800).
 
-Q4. Has census tract 01073010500 been consistently designated as a QCT from 2020 to 2025?
-    EXPECTED: Yes — is_designated = 1 for all 6 years (2020–2025).
-    Poverty rates: 2020: 27.7%, 2021: 26.8%, 2022: 21.3%, 2023: 22.6%, 2025: 20.7%.
+4. What is the HMDA fair lending risk score for Dallas County TX in 2024?
+   ANSWER: 2.13 (risk_tier = "high"), denial_rate_overall=10.4%, denial_rate_minority=11.7%.
+   (Dallas-Fort Worth-Arlington, TX metro area.)
 
-Q5. When did census tract 01005950300 lose its QCT designation?
-    EXPECTED: Designated in 2022 (both) and 2023 (income). Lost designation in 2024 (is_designated=0).
-    Poverty at 2023 designation: 24.1%. Poverty at 2024: 17.8% (below threshold).
+5. Show me special HUD program income limits for 2025 in state FIPS 06.
+   ANSWER: 153 rows (CA special-program areas, e.g. SEC221_BMIR/SEC235/SEC236 across
+   Bakersfield-Delano, Chico, El Centro, Fresno, ... CA areas). Not a single number —
+   check the agent lists multiple areas/program types, doesn't collapse to one row.
 
-------------------------------------------------------------------------------
-CATEGORY 2: DUAL DESIGNATION (QCT + DDA)
-------------------------------------------------------------------------------
+=== Search / multi-row tools ===
 
-Q6. Is census tract 01001020700 eligible for the 30% basis boost in 2025?   
-    EXPECTED: Yes — it is both QCT designated (trigger: income) and located in
-    Montgomery, AL MSA which is an SDDA in 2025. Both carry basis_boost_pct = 30.
+6. How many census tracts in Alabama (state FIPS 01) were QCT designated in 2025?
+   ANSWER: 324 tracts.
+   (Previously produced a cartesian-product bug returning ~16,000+ rows — regression check.
+   If the agent returns anything wildly larger than 324, the disconnected-MATCH bug is back.)
 
-Q7. Is census tract 01001020700 in a Difficult Development Area in 2025?
-    EXPECTED: Yes — its metro area (Montgomery, AL MSA) is an SDDA designation
-    for 2025 with basis_boost_pct = 30.
+7. Which counties are DDA designated in Texas for 2025?
+   ANSWER: 58 non-metro counties (NMDDADesignation, is_designated=True) PLUS 10 metro
+   areas overlapping TX are SDDA-designated (Wichita Falls, Austin-Round Rock-San Marcos,
+   Killeen-Temple, Brownsville-Harlingen, Dallas-Fort Worth-Arlington, + 5 more).
+   Note: DDA has two separate designation types (metro SDDA vs non-metro NMDDA) — a
+   correct answer should account for both, not just one.
 
-------------------------------------------------------------------------------
-CATEGORY 3: SEARCH / BULK QUERIES
-------------------------------------------------------------------------------
+8. List census tracts in county FIPS 48113 (Dallas, TX) that are both QCT and DDA
+   designated in 2025.
+   ANSWER: 221 tracts.
 
-    Q8. Show me all QCT designated tracts in Dallas County (county FIPS 48113) for 2025 
-        where the poverty rate is above 25%.
-    EXPECTED: 47 tracts match. Tests search path and COALESCE(is_designated,0)=1 filter.
+=== Trend / range ===
 
-Q9. How many census tracts in Alabama (state FIPS 01) were QCT designated in 2025?
-    EXPECTED: Agent should count QCTDesignation nodes with state_fips="01",
-    designation_year=2025, COALESCE(is_designated,0)=1.
+9. How has HMDA lending risk in Harris County TX (48201) changed from 2020 to 2024?
+   ANSWER: Only 2022-2024 data exists (no 2020/2021 rows).
+     2022: score=0.43, tier=low
+     2023: score=0.43, tier=low
+     2024: score=1.37, tier=elevated
+   A correct answer should note the 2020-2021 gap rather than silently ignoring it or
+   fabricating values.
 
-------------------------------------------------------------------------------
-CATEGORY 4: AMI LIMITS
-------------------------------------------------------------------------------
+10. Compare HMDA lending risk in Dallas and Houston for 2024.
+    ANSWER: Dallas (48113): score=2.13, tier=high.
+            Houston (48201): score=1.37, tier=elevated.
+            Dallas has the higher/worse risk score.
 
-Q10. What is the VLI income limit for a 4-person household in Dallas County, TX for 2025?
-     EXPECTED: $58,650 (Section8AMILimit, area: "Dallas, TX HUD Metro FMR Area").
+=== Multi-year same-entity (tests the check_qct multi-year split fix) ===
 
-Q11. What is the maximum allowable IRC §42 gross rent for a LIHTC unit in Dallas County
-     TX for 2025 under the VLI program?
-     EXPECTED: $1,466/month (= $58,650 × 30% ÷ 12, rounded).
+11. Is census tract 19113000213 a QCT in both 2025 and 2024?
+    ANSWER: No — designated in 2025 (basis_boost_pct=30) but NOT in 2024
+    (is_designated=False, basis_boost_pct=0). So "both" is false.
 
-Q12. What are the VLI income limits by household size for Dallas County TX in 2025?
-     EXPECTED: From Section8AMILimit — 1-person: $41,100, 4-person: $58,650.
-     Area: "Dallas, TX HUD Metro FMR Area".
+12. Is census tract 19113000213 QCT designated in 2025 but not in 2024?
+    ANSWER: Yes. 2025: is_designated=True. 2024: is_designated=False.
+    (This is the exact question that previously "brought back a lot of records" when
+    both years were combined in one query — confirm the agent now issues one check_qct
+    call per year instead of one widened-range query.)
 
-------------------------------------------------------------------------------
-CATEGORY 5: HMDA LENDING RISK
-------------------------------------------------------------------------------
+=== Cross-cutting / fallback (custom_query) ===
 
-Q13. What is the HMDA lending risk tier for CBSA 40140 in 2024?
-     EXPECTED: Two Metropolitan Division records exist. The high-disparity MD has:
-     risk_tier = "high", denial_rate_disparity_ratio = 8.19, total_applications = 79,907,
-     denial_rate_minority = 14.1%, denial_rate_white = 1.7%.
-
-Q14. Which CBSA had the highest minority-to-white denial rate disparity in 2024?
-     EXPECTED: CBSA 40140 (disparity ratio 8.19) ranks first among loaded data.
-     Tests ORDER BY DESC on denial_rate_disparity_ratio.
-
-------------------------------------------------------------------------------
-CATEGORY 6: SDDA / NMDDA
-------------------------------------------------------------------------------
-
-Q15. Is the Akron, OH MSA a Difficult Development Area in 2025?
-     EXPECTED: Yes — SDDADesignation for fmr_area_code "METRO10420M10420",
-     area_name "Akron, OH MSA", is_designated=1, basis_boost_pct=30, safmr_2br=$1,970.
-
-Q16. Is the Albany, OR MSA a Difficult Development Area in 2025?
-     EXPECTED: Yes — SDDADesignation for fmr_area_code "METRO10540M10540",
-     is_designated=1, basis_boost_pct=30, safmr_2br=$2,030.
-
-------------------------------------------------------------------------------
-CATEGORY 7: META / MULTI-STEP REASONING
-------------------------------------------------------------------------------
-
-Q17. For census tract 01001020700 in 2025, what is the basis boost percentage and
-     what qualifies it — QCT, DDA, or both?
-     EXPECTED: Both QCT (income trigger) and SDDA (Montgomery, AL MSA). Boost = 30%.
-
-Q18. Compare the QCT designation status of tract 01005950300 in 2023 versus 2025.
-     EXPECTED: 2023 = designated (income, poverty 24.1%). 2025 = not designated
-     (poverty 21.6%, below threshold). Dedesignated between 2023 and 2024.
-
-==============================================================================
-DATA NOTES
-==============================================================================
-- QCT data in graph: 2003–2025 (all years loaded).
-- AMI data in graph: 2025 only (Section8AMILimit, StateAMILimit).
-- DDA data in graph: 2025 only (SDDADesignation, NMDDADesignation).
-- HMDA data in graph: 2024 (LenderBehaviorRisk, assessment_year stored as STRING).
-- County nodes have no name — resolve county names to county_fips in Cypher.
-- QCTDesignation.is_designated is INTEGER — use COALESCE(q.is_designated,0)=1.
-==============================================================================
+13. Which state has the highest number of QCT-designated tracts in 2025?
+    ANSWER: California (state FIPS 06) — 1,757 tracts.
+    Runners-up: Texas (48) 1,401; New York (36) 1,043.

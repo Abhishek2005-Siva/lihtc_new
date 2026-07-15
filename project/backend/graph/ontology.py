@@ -1,13 +1,9 @@
-"""Loads and caches the Neo4j ontology from the static lihtc_ontology.json file."""
+"""The Neo4j ontology data structure. Loaded from data/ontology/lihtc_ontology.json
+by whichever entrypoint needs it (see app.py / mcp_server.py's _load_ontology())."""
 from __future__ import annotations
 
-import json
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any
-
-# Canonical path to the static ontology file.
-_ONTOLOGY_FILE = Path(__file__).resolve().parents[2] / "data" / "ontology" / "lihtc_ontology.json"
 
 
 @dataclass
@@ -107,71 +103,3 @@ class GraphOntology:
             lines.append(f"  {i}. {quirk}")
 
         return "\n".join(lines)
-
-
-class OntologyLoader:
-    """Loads GraphOntology from the static lihtc_ontology.json file.
-
-    Falls back to live Neo4j introspection if the static file is not found,
-    but the static file is authoritative and preferred — it contains type
-    constraints, year ranges, and quirks that Neo4j introspection cannot
-    provide.
-    """
-
-    def __init__(
-        self,
-        neo4j_client=None,
-        ontology_path: str | Path | None = None,
-        cache_path: str | Path = "backend/graph/schema_cache.json",
-    ) -> None:
-        self.neo4j_client = neo4j_client
-        self.ontology_path = Path(ontology_path) if ontology_path else _ONTOLOGY_FILE
-        self.cache_path = Path(cache_path)
-
-    def load(self, refresh: bool = False) -> GraphOntology:
-        """Load ontology. Static file takes precedence over Neo4j introspection."""
-        if self.ontology_path.exists():
-            return self._load_from_file(self.ontology_path)
-
-        # Fallback: cache or live Neo4j (static file missing)
-        if self.cache_path.exists() and not refresh:
-            return self._load_from_file(self.cache_path)
-
-        if self.neo4j_client is None:
-            raise FileNotFoundError(
-                f"Ontology file not found at {self.ontology_path} and no neo4j_client provided."
-            )
-        ontology = self._load_from_neo4j()
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self.cache_path.write_text(json.dumps(asdict(ontology), indent=2), encoding="utf-8")
-        return ontology
-
-    def _load_from_file(self, path: Path) -> GraphOntology:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        # Strip keys not in the dataclass
-        known = {f.name for f in GraphOntology.__dataclass_fields__.values()}
-        filtered = {k: v for k, v in data.items() if k in known}
-        return GraphOntology(**filtered)
-
-    def _load_from_neo4j(self) -> GraphOntology:
-        labels = [
-            row["label"]
-            for row in self.neo4j_client.run_read(
-                "CALL db.labels() YIELD label RETURN label ORDER BY label"
-            )
-        ]
-        rels = [
-            row["relationshipType"]
-            for row in self.neo4j_client.run_read(
-                "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType ORDER BY relationshipType"
-            )
-        ]
-        props = self._load_properties_by_label(labels)
-        return GraphOntology(labels=labels, relationship_types=rels, properties_by_label=props)
-
-    def _load_properties_by_label(self, labels: list[str]) -> dict[str, list[str]]:
-        properties: dict[str, list[str]] = {}
-        for label in labels:
-            query = f"MATCH (n:`{label}`) UNWIND keys(n) AS key RETURN DISTINCT key ORDER BY key"
-            properties[label] = [row["key"] for row in self.neo4j_client.run_read(query)]
-        return properties

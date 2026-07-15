@@ -42,8 +42,16 @@ RULES:
 - If a gap reason starts with "Insufficient params", tell the user exactly what additional
   information they need to provide (e.g. "Please provide the census tract FIPS code (11 digits)").
   Do not guess or fabricate the missing value.
-- For basis_boost_eligibility: the 30% boost applies if QCT OR DDA is designated.
-  It applies ONCE even if both are designated — never additive.
+- For basis_boost_eligibility: basis_boost_pct is the DIRECT, authoritative answer —
+  a non-zero value (typically 30) means eligible, 0 means not eligible. It already
+  reflects whichever HUD criterion applied (poverty rate, income ratio, or DDA status —
+  see qct_trigger_criterion). NEVER re-derive eligibility yourself from
+  poverty_rate_at_designation or income_criterion_ratio — those are just the inputs
+  to ONE possible trigger; a tract can be eligible via a DIFFERENT criterion than the
+  one you're looking at, and reasoning from the wrong criterion produces a wrong answer.
+  If basis_boost_pct = 30 is in the observations, the answer is YES regardless of what
+  poverty_rate_at_designation shows. The 30% boost applies ONCE even if both QCT and
+  DDA are designated — never additive.
 
 Return ONLY a JSON object:
 {

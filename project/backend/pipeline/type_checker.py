@@ -24,12 +24,12 @@ _PROP_TYPES: dict[str, str] = {
     "limit_7person":    "INTEGER",
     "limit_8person":    "INTEGER",
     "max_rent":         "INTEGER",
+    "assessment_year":  "INTEGER",
     # STRING (these should never be unquoted bare integers)
     "fips_code":        "STRING",
     "county_fips":      "STRING",
     "state_fips":       "STRING",
     "cbsa_code":        "STRING",
-    "assessment_year":  "STRING",   # special — must use toString($year)
     # BOOLEAN
     "is_designated":              "BOOLEAN",
     "is_high_disparity":          "BOOLEAN",
@@ -88,18 +88,187 @@ def find_unauthorized_params(cypher: str, allowed: set[str]) -> str | None:
     )
 
 
+# Fixed-width, zero-padded geographic identifiers per the schema (see ontology
+# quirks: zfill(11)/zfill(5)/zfill(2)). A wrong length is a reliable signature
+# of a broader geography's code being reused for a narrower field it doesn't
+# belong in (e.g. a 5-digit county_fips passed as an 11-digit tract fips_code
+# when the question only names a county, no specific tract) — confirmed via a
+# real trace where this silently returned zero rows with no error at all.
+_FIXED_WIDTH_ID_PARAMS = {
+    "fips_code": 11,
+    "county_fips": 5,
+    "state_fips": 2,
+}
+
+
+def find_wrong_length_identifier(cypher: str, exec_params: dict) -> str | None:
+    """Return an actionable error if a fixed-width geographic identifier param
+    has the wrong length for what it's supposed to be.
+
+    Only fires when the Cypher actually compares a property of the SAME name
+    to the param (e.g. "fips_code: $fips_code" or ".fips_code = $fips_code") —
+    a param merely NAMED "fips_code" that the model bound to some unrelated
+    property (e.g. "state: $fips_code") isn't this bug, just a misleading
+    param name with a perfectly valid value; flagging it there was a real
+    false positive caught in testing (a SpecialProgramLimit.state filter using
+    a 2-digit state code, correctly used, rejected only because of its name).
+    """
+    for param, expected_len in _FIXED_WIDTH_ID_PARAMS.items():
+        value = exec_params.get(param)
+        if not isinstance(value, str) or len(value) == expected_len:
+            continue
+        if not re.search(rf"\b{param}\s*(?::|=)\s*\${param}\b", cypher):
+            continue
+        example = {11: "01001020700", 5: "48113", 2: "48"}[expected_len]
+        return (
+            f"WRONG-LENGTH IDENTIFIER: params['{param}'] = {value!r} is "
+            f"{len(value)} character(s), but {param} must be exactly "
+            f"{expected_len} zero-padded digits (e.g. '{example}'). This usually means a "
+            f"broader geography's code (e.g. county_fips) was reused for a narrower field "
+            f"it doesn't belong in, because the question only names that broader geography "
+            f"with no specific tract given. Do NOT invent a tract-level identifier — remove "
+            f"'{param}' from params/Cypher entirely and anchor the query on whichever entity "
+            f"the question actually names instead (e.g. MATCH County directly, not CensusTract)."
+        )
+    return None
+
+
+def find_fabricated_fips_code(cypher: str, exec_params: dict, question: str) -> str | None:
+    """Return an actionable error if a fips_code param was declared but that
+    exact 11-digit string never appears in the user's question.
+
+    Unlike a county/metro NAME (which the model may legitimately resolve to a
+    FIPS code from general knowledge — "Dallas TX" -> "48113"), a specific
+    tract's fips_code is only knowable if the question states it explicitly;
+    there is no name-based lookup for an individual tract. A fips_code that
+    isn't in the question at all is fabricated — confirmed via real traces
+    where the model dodged the plain wrong-length check above by padding a
+    county_fips with zeros (e.g. '17031' -> '17031000000') to fake the right
+    length, or by matching some unrelated real tract entirely by accident.
+
+    Only fires when the Cypher actually compares CensusTract.fips_code to this
+    param (same false-positive guard as find_wrong_length_identifier — a param
+    merely NAMED "fips_code" bound to an unrelated property isn't this bug).
+    """
+    value = exec_params.get("fips_code")
+    if not isinstance(value, str) or len(value) != 11:
+        return None  # wrong-length case already caught by find_wrong_length_identifier
+    if not re.search(r"\bfips_code\s*(?::|=)\s*\$fips_code\b", cypher):
+        return None
+    if value in question:
+        return None
+    return (
+        f"FABRICATED TRACT IDENTIFIER: params['fips_code'] = '{value}' does not appear "
+        f"anywhere in the user's question. A tract-level fips_code can ONLY be used if "
+        f"the question states that exact 11-digit number explicitly — it cannot be "
+        f"derived or guessed from a county/metro name the way county_fips can. Remove "
+        f"'fips_code' and the CensusTract match entirely, and anchor the query on "
+        f"whichever geography the question actually names instead (e.g. MATCH County "
+        f"directly using county_fips)."
+    )
+
+
+# Matches the fabricated-anchor shape as the CYPHER'S FIRST LINE: a bare
+# CensusTract match keyed purely on fips_code, with nothing else in its
+# property map (a real per-tract query would have no other reason to look
+# different from this — the anti-pattern is specifically this exact shape used
+# when only a county was named).
+_FIRST_MATCH_CT_RE = re.compile(
+    r"^\s*MATCH\s*\(\s*ct\s*:\s*CensusTract\s*\{\s*fips_code\s*:\s*\$fips_code\s*\}\s*\)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+# The very next hop from ct to County via IN_COUNTY — this is what should
+# become the new anchor once the fabricated ct match is dropped.
+_CT_TO_COUNTY_HOP_RE = re.compile(
+    r"^\s*(?:OPTIONAL\s+)?MATCH\s*\(\s*ct\s*\)\s*-\s*\[\s*:\s*IN_COUNTY\s*\]\s*->\s*"
+    r"(\(\s*co\s*:\s*County\s*\{[^}]*\}\s*\))\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def fix_fabricated_tract_anchor(
+    cypher: str, exec_params: dict, question: str,
+) -> tuple[str, dict]:
+    """Mechanically rewrite the fabricated-tract-anchor anti-pattern: a MATCH
+    on CensusTract keyed by a fips_code that's either the wrong length or not
+    actually in the question (see find_wrong_length_identifier /
+    find_fabricated_fips_code above), immediately followed by a hop to County
+    via IN_COUNTY — when all the query actually needed was the County itself.
+
+    Confirmed via repeated real traces that prompt guidance alone does not
+    reliably stop the model from anchoring on CensusTract even when the
+    question only names a county (it kept re-fabricating a fips_code across
+    retries — sometimes by padding a county_fips with zeros to dodge the
+    length check), so this corrects it mechanically instead of relying on the
+    retry loop to converge.
+
+    Only fires when the rewrite is unambiguous: a fabricated/wrong-length
+    fips_code, a real county_fips already declared, a bare single-key
+    CensusTract match as the cypher's first line, and a clean hop to County
+    right after. Leaves the query untouched in every other case — it's safer
+    to fall through to the retry loop than risk a partial/bad rewrite.
+    """
+    fips = exec_params.get("fips_code")
+    county_fips = exec_params.get("county_fips")
+    if not isinstance(fips, str) or not isinstance(county_fips, str):
+        return cypher, exec_params
+    fabricated = len(fips) != 11 or fips not in question
+    if not fabricated:
+        return cypher, exec_params
+
+    lines = cypher.splitlines()
+    if not lines or not _FIRST_MATCH_CT_RE.match(lines[0]):
+        return cypher, exec_params
+    if not _CT_TO_COUNTY_HOP_RE.search(cypher):
+        return cypher, exec_params
+
+    new_cypher = "\n".join(lines[1:])  # drop the fabricated CensusTract match
+    new_cypher = _CT_TO_COUNTY_HOP_RE.sub(
+        lambda m: f"MATCH {m.group(1)}", new_cypher, count=1,
+    )
+    # Any remaining (ct)-[:IN_METRO]-> must redirect through co instead, since
+    # ct no longer exists — County has its own IN_METRO relationship too.
+    new_cypher = re.sub(
+        r"\(\s*ct\s*\)(\s*-\s*\[\s*:\s*IN_METRO\s*\])", r"(co)\1",
+        new_cypher, flags=re.IGNORECASE,
+    )
+
+    # Bail out entirely if `ct` is still referenced anywhere else — the shape
+    # wasn't as clean as expected; a partial rewrite is worse than none.
+    if re.search(r"\bct\b", new_cypher):
+        return cypher, exec_params
+
+    new_params = {k: v for k, v in exec_params.items() if k != "fips_code"}
+    return new_cypher, new_params
+
+
 # Extracts the RETURN clause body (up to ORDER BY / LIMIT / end of string).
 _RETURN_CLAUSE_RE = re.compile(
     r"\bRETURN\s+(.+?)(?=\r?\n\s*(?:ORDER\s+BY|LIMIT)\b|$)", re.IGNORECASE | re.DOTALL,
 )
 
+# Matches alias.attr <op> $param inside WHERE — the general "filtered but not
+# returned" pattern, not just min_/max_-prefixed ones. Anchor/identity fields
+# are excluded (see _ANCHOR_ATTRS) since those are normally used purely to
+# scope the query, not as the thing the user is asking about.
+_WHERE_PARAM_FILTER_RE = re.compile(
+    r"\b[A-Za-z_][A-Za-z0-9_]*\.([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|>=|<=|>|<)\s*\$[A-Za-z_][A-Za-z0-9_]*"
+)
+_ANCHOR_ATTRS = {
+    "fips_code", "county_fips", "state_fips", "cbsa_code",
+    "year", "designation_year", "assessment_year", "start_year", "end_year",
+    "is_designated",
+}
+
 
 def find_missing_filter_columns(cypher: str, param_keys) -> str | None:
-    """If the query filters on min_<attr>/max_<attr>, that attribute must appear
-    in the RETURN clause — otherwise the user asked to filter on a value they can
-    never see in the result, which validators have been scoring as "relevant"
-    even though the answer is incomplete (e.g. filtering poverty_rate but never
-    returning it). Returns an actionable error if an attribute is missing.
+    """If the query filters on an attribute, that attribute must appear in the
+    RETURN clause — otherwise the user asked about a value they can never see
+    in the result. This was a real bug: a query filtered on basis_boost_pct
+    (the actual thing the question asked about) but only returned an unrelated
+    field, so the Synthesizer never saw basis_boost_pct and had to guess at the
+    answer from other data, producing a wrong conclusion. Returns an actionable
+    error if an attribute is missing.
     """
     m = _RETURN_CLAUSE_RE.search(cypher)
     return_body = m.group(1) if m else ""
@@ -112,6 +281,13 @@ def find_missing_filter_columns(cypher: str, param_keys) -> str | None:
         elif key.startswith("max_"):
             attr = key[len("max_"):]
         if attr and not re.search(rf"\b{re.escape(attr)}\b", return_body):
+            missing.append(attr)
+
+    for m2 in _WHERE_PARAM_FILTER_RE.finditer(cypher):
+        attr = m2.group(1)
+        if attr in _ANCHOR_ATTRS:
+            continue
+        if not re.search(rf"\b{re.escape(attr)}\b", return_body):
             missing.append(attr)
 
     if not missing:
@@ -262,14 +438,99 @@ def find_map_range_filter(cypher: str) -> str | None:
     )
 
 
-# Detects the "OPTIONAL MATCH + WHERE" trap: a WHERE clause directly attached to
-# an OPTIONAL MATCH only decides which candidate nodes may bind to that pattern —
-# it does NOT drop the outer row when nothing satisfies it. The row still comes
-# back with every column from that optional variable as NULL. This was the root
-# cause behind several "all columns NULL" reports even after other bugs were fixed.
+# Detects a MATCH/OPTIONAL MATCH clause that introduces a brand-new node with NO
+# relationship arrow connecting it to anything matched earlier — a standalone
+# "(alias:Label {...})" pattern with no -[...]-> or <-[...]- anywhere in it.
+# Two independently-matched node sets with no join condition between them is a
+# cartesian product: Neo4j pairs EVERY row from one set with EVERY row from the
+# other, completely ignoring which specific entity the first MATCH anchored on.
+# This has occurred repeatedly and is a much worse failure than a syntax error —
+# the query runs "successfully" and returns large amounts of unrelated data.
+_MATCH_LINE_RE = re.compile(r"^\s*(?:OPTIONAL\s+)?MATCH\s+(.*)$", re.IGNORECASE)
+_REL_ARROW_ANYWHERE_RE = re.compile(r"-\s*\[|\]\s*-|<-|->")
+
+
+def find_disconnected_match(cypher: str) -> str | None:
+    """Return an actionable error if a MATCH/OPTIONAL MATCH clause (after the
+    first) introduces a new node with no relationship connecting it to a
+    previously matched variable — the cartesian-product anti-pattern.
+    """
+    lines = cypher.splitlines()
+    match_lines = [
+        (i, m.group(1)) for i, line in enumerate(lines)
+        if (m := _MATCH_LINE_RE.match(line))
+    ]
+    if len(match_lines) < 2:
+        return None
+
+    for i, (line_no, body) in enumerate(match_lines):
+        if i == 0:
+            continue  # the first MATCH always anchors the query — nothing to connect to yet
+        if not _REL_ARROW_ANYWHERE_RE.search(body):
+            alias_m = _NODE_ALIAS_RE.search(body)
+            alias = alias_m.group(1) if alias_m else "?"
+            return (
+                f"DISCONNECTED MATCH: the clause 'MATCH {body.strip()}' introduces "
+                f"'{alias}' with NO relationship arrow (-[:REL]-> or <-[:REL]-) connecting "
+                f"it to any previously matched node. Two separately-matched node sets with "
+                f"no join between them produce a CARTESIAN PRODUCT — Neo4j pairs every row "
+                f"from one set with every row from the other, returning data for entities "
+                f"completely unrelated to what the earlier MATCH anchored on. Add a "
+                f"relationship path connecting '{alias}' to an already-matched variable "
+                f"(e.g. via APPLIES_TO), or if '{alias}' is meant to filter by a shared "
+                f"property, join through the graph relationship instead of matching it "
+                f"independently."
+            )
+    return None
+
+
 _OPTIONAL_MATCH_LINE_RE = re.compile(r"^\s*OPTIONAL\s+MATCH\s+(.*)$", re.IGNORECASE)
 _WHERE_LINE_RE = re.compile(r"^\s*WHERE\s+(.*)$", re.IGNORECASE)
 _NODE_ALIAS_RE = re.compile(r"\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*[:)]")
+
+# Detects the LLM writing a WHERE condition with an unclosed "(" and then
+# starting the NEXT clause (WITH/RETURN/MATCH/OPTIONAL MATCH) before closing
+# it — e.g. "WHERE (a = $x\nWITH a) AND (b)" — a structurally invalid attempt to
+# combine two conditions that involve a second MATCH. Confirmed via diagnostic
+# testing as a recurring failure the model does not reliably avoid even when
+# told about it directly in the system prompt, so it's caught deterministically
+# here instead, the same way the OPTIONAL MATCH + WHERE trap is.
+_WHERE_START_RE = re.compile(r"^\s*WHERE\b", re.IGNORECASE)
+_CLAUSE_KEYWORD_LINE_RE = re.compile(r"^\s*(WITH|RETURN|OPTIONAL\s+MATCH|MATCH)\b", re.IGNORECASE)
+
+
+def find_clause_inside_where(cypher: str) -> str | None:
+    """Return an actionable error if a WITH/RETURN/MATCH/OPTIONAL MATCH clause
+    keyword starts on the line right after a WHERE whose parentheses are still
+    unclosed — i.e. a new clause was nested inside a WHERE condition instead of
+    the WHERE being closed first.
+    """
+    lines = cypher.splitlines()
+    for i, line in enumerate(lines):
+        if not _WHERE_START_RE.match(line):
+            continue
+        if line.count("(") <= line.count(")"):
+            continue  # this WHERE line's parens are already balanced
+        j = i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        if j >= len(lines):
+            continue
+        m = _CLAUSE_KEYWORD_LINE_RE.match(lines[j])
+        if not m:
+            continue
+        keyword = m.group(1).upper()
+        return (
+            f"CLAUSE NESTED INSIDE WHERE: the WHERE clause opens a '(' that is still "
+            f"unclosed when '{keyword}' starts on the next line. WITH/RETURN/MATCH/"
+            f"OPTIONAL MATCH must NEVER appear inside a WHERE condition's parentheses — "
+            f"they are always separate, top-level clauses. Close every '(' the WHERE "
+            f"opened BEFORE this point, and move '{keyword}' out to its own line as a "
+            f"normal top-level clause. If you need a second pattern to check a second "
+            f"condition, write it as its own OPTIONAL MATCH clause placed BEFORE the "
+            f"WHERE, then reference both variables together in one WHERE ... AND ... ."
+        )
+    return None
 
 
 def fix_optional_match_where_trap(cypher: str) -> str:
@@ -386,23 +647,24 @@ def check_and_fix(cypher: str) -> TypeCheckResult:
             fixes.append(f"{f}: added quotes (STRING)")
             cypher = new
 
-    # assessment_year — must use toString($year) not bare $year
+    # assessment_year is an INTEGER (confirmed against live data — it was
+    # incorrectly documented as STRING before). Unwrap any toString(...) the
+    # model still wraps it in out of training habit — comparing an INTEGER
+    # property to a STRING value silently matches zero rows, no error at all.
     new = re.sub(
-        r"assessment_year\s*=\s*\$year(?![_A-Za-z0-9])",
-        "assessment_year = toString($year)", cypher,
+        r"assessment_year\s*=\s*toString\(([^()]+)\)",
+        r"assessment_year = \1", cypher, flags=re.IGNORECASE,
     )
     if new != cypher:
-        fixes.append("assessment_year: wrapped in toString() (STRING)")
-        cypher = new
-
-    # assessment_year — bare integer (not param) → quoted string
-    new = re.sub(r"(assessment_year\s*=\s*)(\d{4})(?!\s*['\"])", r"\g<1>'\g<2>'", cypher)
-    if new != cypher:
-        fixes.append("assessment_year: added quotes (STRING)")
+        fixes.append("assessment_year: removed toString() wrapper (INTEGER)")
         cypher = new
 
     # ORDER BY / LIMIT ordering — LIMIT must come after ORDER BY
-    order_m = re.search(r"\bORDER\s+BY\s+.+?(?=\s*(?:SKIP|LIMIT|$))", cypher,
+    # \b...\b around SKIP/LIMIT is required: without it, "LIMIT" matches
+    # case-insensitively as a bare substring of property names like
+    # "limit_4person" (very common in this schema — AMI limit fields), truncating
+    # the ORDER BY capture right after the first such reference (e.g. "ORDER BY s.").
+    order_m = re.search(r"\bORDER\s+BY\s+.+?(?=\s*(?:\bSKIP\b|\bLIMIT\b|$))", cypher,
                         re.IGNORECASE | re.DOTALL)
     skip_m  = re.search(r"\bSKIP\s+\S+",  cypher, re.IGNORECASE)
     limit_m = re.search(r"\bLIMIT\s+\S+", cypher, re.IGNORECASE)

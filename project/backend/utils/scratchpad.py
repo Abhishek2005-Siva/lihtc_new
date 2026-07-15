@@ -14,7 +14,6 @@ class StepRecord:
     row_count: int
     error: str | None = None
     type_fixes: list[str] = field(default_factory=list)
-    path_id: str = ""
     validation_score: float | None = None
     validation_reason: str = ""
 
@@ -30,12 +29,11 @@ class Scratchpad:
 
     def add_step(self, record: StepRecord) -> None:
         """Log the step. Does NOT touch observations — call record_observation()
-        once validation score is known, so multiple paths competing for the same
-        tool don't just let the last one processed silently win."""
+        once validation score is known."""
         self.steps_taken.append(record)
 
     def record_observation(self, tool: str, rows: list[dict[str, Any]], score: float) -> None:
-        """Keep only the highest-scoring passing result per tool across all paths."""
+        """Keep only the highest-scoring passing result per tool."""
         if not rows:
             return
         if tool not in self._best_score or score > self._best_score[tool]:
@@ -64,7 +62,6 @@ class Scratchpad:
                     "row_count":  s.row_count,
                     "sample":     s.rows[:3],
                     "error":      s.error,
-                    "path_id":    s.path_id,
                 }
                 for s in self.steps_taken
             ],
