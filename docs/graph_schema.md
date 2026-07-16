@@ -534,13 +534,13 @@ Bronze (raw files)  ->  Silver (cleaned parquet)  ->  Neo4j (graph)
 
 ```bash
 # Full ingestion
-python scripts/neo4j_ingest/ingest_datasets.py --dataset qct dda ami hmda
+python ingest_scripts/neo4j_ingest/ingest_datasets.py --dataset qct dda ami hmda
 
 # Single dataset, specific years
-python scripts/neo4j_ingest/ingest_datasets.py --dataset hmda --year 2024 2025
+python ingest_scripts/neo4j_ingest/ingest_datasets.py --dataset hmda --year 2024 2025
 
 # Bootstrap geography first (one-time)
-python scripts/bootstrap/bootstrap_geography.py
+python ingest_scripts/bootstrap/bootstrap_geography.py
 ```
 
 ---
@@ -550,28 +550,28 @@ python scripts/bootstrap/bootstrap_geography.py
 ### Bronze Ingest
 | Script | Purpose |
 |--------|---------|
-| `scripts/bronze_ingest/ingest_HMDA.py` | Downloads HMDA LAR, Panel, TS from CFPB (2018–2025) |
-| `scripts/bronze_ingest/ingest_QCTDDA.py` | Downloads QCT/DDA/NMDDA from HUD |
-| `scripts/bronze_ingest/ingest_AMI.py` | Downloads Section 8 AMI limits from HUD |
+| `ingest_scripts/bronze_ingest/ingest_HMDA.py` | Downloads HMDA LAR, Panel, TS from CFPB (2018–2025) |
+| `ingest_scripts/bronze_ingest/ingest_QCTDDA.py` | Downloads QCT/DDA/NMDDA from HUD |
+| `ingest_scripts/bronze_ingest/ingest_AMI.py` | Downloads Section 8 AMI limits from HUD |
 
 ### Silver Transform
 | Script | Purpose |
 |--------|---------|
-| `scripts/silver_transform/silver_hmda.py` | HMDA LAR -> silver parquet + Excel. Handles both snapshot (2018–2021) and modified LAR (2022+) formats. |
-| `scripts/silver_transform/build_risk_from_parquet.py` | Builds `silver_lender_behavior_risk_{year}.parquet` from silver LAR using named columns (fixes the column-position bug in pre-2022 data) |
-| `scripts/silver_transform/silver_qct_dda.py` | QCT/DDA -> silver |
-| `scripts/silver_transform/silver_ami.py` | AMI -> silver |
+| `ingest_scripts/silver_transform/silver_hmda.py` | HMDA LAR -> silver parquet + Excel. Handles both snapshot (2018–2021) and modified LAR (2022+) formats. |
+| `ingest_scripts/silver_transform/build_risk_from_parquet.py` | Builds `silver_lender_behavior_risk_{year}.parquet` from silver LAR using named columns (fixes the column-position bug in pre-2022 data) |
+| `ingest_scripts/silver_transform/silver_qct_dda.py` | QCT/DDA -> silver |
+| `ingest_scripts/silver_transform/silver_ami.py` | AMI -> silver |
 
 ### Bootstrap (one-time)
 | Script | Purpose |
 |--------|---------|
-| `scripts/bootstrap/bootstrap_geography.py` | Creates all State, County, CensusTract, MetroArea nodes + geographic hierarchy edges |
+| `ingest_scripts/bootstrap/bootstrap_geography.py` | Creates all State, County, CensusTract, MetroArea nodes + geographic hierarchy edges |
 
 ### Neo4j Ingest
 | Script | Purpose |
 |--------|---------|
-| `scripts/neo4j_ingest/ingest_datasets.py` | Main ingest: QCT, DDA, AMI, HMDA all years via LOAD CSV |
-| `scripts/neo4j_ingest/fix_edges.py` | One-time fixes: OMB crosswalk, HAS_STATE_AMI, SDDA edges, HMDA->MetroArea |
+| `ingest_scripts/neo4j_ingest/ingest_datasets.py` | Main ingest: QCT, DDA, AMI, HMDA all years via LOAD CSV |
+| `ingest_scripts/neo4j_ingest/fix_edges.py` | One-time fixes: OMB crosswalk, HAS_STATE_AMI, SDDA edges, HMDA->MetroArea |
 
 ### Gap Fixes (one-time patches)
 | Script | Purpose |

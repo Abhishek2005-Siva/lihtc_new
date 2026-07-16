@@ -538,7 +538,7 @@ def _find_pdf(year: int, kind: str) -> Path | None:
     if not year_dir.exists():
         raise FileNotFoundError(
             f"bronze_files/dda/{year}/ does not exist. "
-            f"Run: python scripts/bronze_ingest/ingest_QCTDDA.py --dataset dda --year {year}"
+            f"Run: python ingest_scripts/bronze_ingest/ingest_QCTDDA.py --dataset dda --year {year}"
         )
     # Preferred: standalone metro/nonmetro file
     preferred = year_dir / f"DDAs{year}_{kind}.pdf"
@@ -611,7 +611,7 @@ def run_dda_from_pdf(year: int) -> None:
     if metro_path is None and nonmetro_path is None:
         raise FileNotFoundError(
             f"No DDA PDFs found in bronze_files/dda/{year}/. "
-            f"Run: python scripts/bronze_ingest/ingest_QCTDDA.py --dataset dda --year {year}"
+            f"Run: python ingest_scripts/bronze_ingest/ingest_QCTDDA.py --dataset dda --year {year}"
         )
 
     # Metro (SDDA)

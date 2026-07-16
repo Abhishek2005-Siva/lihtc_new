@@ -18,9 +18,9 @@ Sources:
   OMB:   bronze_files/omb/list1_2023.xlsx  (downloaded if missing)
 
 Usage:
-    python scripts/bootstrap/bootstrap_geography.py
-    python scripts/bootstrap/bootstrap_geography.py --dry-run
-    python scripts/bootstrap/bootstrap_geography.py --step 7 8
+    python ingest_scripts/bootstrap/bootstrap_geography.py
+    python ingest_scripts/bootstrap/bootstrap_geography.py --dry-run
+    python ingest_scripts/bootstrap/bootstrap_geography.py --step 7 8
 """
 
 from __future__ import annotations

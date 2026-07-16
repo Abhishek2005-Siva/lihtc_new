@@ -6,9 +6,9 @@ LOAD CSV ... IN TRANSACTIONS for ~5-10x faster ingestion vs Python driver batche
 
 Usage
 -----
-    python scripts/neo4j_ingest/ingest_datasets.py --dataset qct --year 2003-2025
-    python scripts/neo4j_ingest/ingest_datasets.py --dataset qct dda ami hmda
-    python scripts/neo4j_ingest/ingest_datasets.py --dataset qct --year 2025 --dry-run
+    python ingest_scripts/neo4j_ingest/ingest_datasets.py --dataset qct --year 2003-2025
+    python ingest_scripts/neo4j_ingest/ingest_datasets.py --dataset qct dda ami hmda
+    python ingest_scripts/neo4j_ingest/ingest_datasets.py --dataset qct --year 2025 --dry-run
 """
 
 from __future__ import annotations
