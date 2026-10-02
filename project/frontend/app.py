@@ -41,6 +41,19 @@ def _get_neo4j(uri: str, user: str, pwd: str) -> Neo4jClient:
 
 # ---------------------------------------------------------------------------
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _neo4j_status(uri: str, user: str, password: str) -> tuple[bool, str]:
+    """Quick connectivity check so a missing database is obvious before the first question."""
+    try:
+        from neo4j import GraphDatabase
+
+        with GraphDatabase.driver(uri, auth=(user, password), connection_timeout=3) as driver:
+            driver.verify_connectivity()
+        return True, ""
+    except Exception as exc:  # noqa: BLE001 - any failure means "not connected"
+        return False, str(exc)[:160]
+
+
 def main() -> None:
     st.set_page_config(page_title="LIHTC Agent", page_icon="🏠", layout="wide")
     _render_sidebar()
@@ -73,7 +86,17 @@ def _render_sidebar() -> None:
             st.rerun()
 
         st.divider()
-        st.caption(f"Neo4j: {load_settings().neo4j_uri}")
+        settings = load_settings()
+        ok, detail = _neo4j_status(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
+        st.caption(f"Neo4j: {settings.neo4j_uri} — {'connected' if ok else 'not connected'}")
+        if not ok:
+            st.warning(
+                "No Neo4j database is reachable, so questions cannot be answered yet. "
+                "Set NEO4J_URI, NEO4J_USER and NEO4J_PASSWORD (in a .env file locally, or in the "
+                "app's Secrets on Streamlit Cloud) and reload.",
+                icon="⚠️",
+            )
+            st.caption(detail)
 
 
 def _render_chat() -> None:
@@ -123,7 +146,7 @@ def _render_examples() -> None:
     ]
     cols = st.columns(2)
     for i, ex in enumerate(examples):
-        if cols[i % 2].button(ex, use_container_width=True, key=f"ex_{i}"):
+        if cols[i % 2].button(ex, width="stretch", key=f"ex_{i}"):
             st.session_state.messages.append({"role": "user", "content": ex})
             st.rerun()
 
@@ -306,7 +329,7 @@ def _render_step_card(n: int, record, attempts: list[dict]) -> None:
                     f"Relevance check: {score:.0%} — {record.validation_reason}</span>",
                     unsafe_allow_html=True,
                 )
-            st.dataframe(record.rows[:10], use_container_width=True)
+            st.dataframe(record.rows[:10], width="stretch")
 
 
 def _render_synthesis(s: dict) -> None:

@@ -6,6 +6,17 @@
 
 An agent that answers plain-English questions about Low-Income Housing Tax Credit (LIHTC) data. It reasons over a Neo4j knowledge graph by generating Cypher from the live ontology, instead of calling hardcoded, business-specific queries.
 
+## Streamlit app
+
+The agent UI. It needs a reachable Neo4j database: set `NEO4J_URI`, `NEO4J_USER` and `NEO4J_PASSWORD` (in a `.env` file locally, or in the app's Secrets on Streamlit Cloud). Paste your NVIDIA API key in the sidebar.
+
+```bash
+pip install -r requirements.txt
+streamlit run project/frontend/app.py
+```
+
+**Deploy on Streamlit Community Cloud:** at [share.streamlit.io](https://share.streamlit.io) choose this repo, branch `main` and main file `project/frontend/app.py`.
+
 ## How it works
 
 1. Understand the user's intent, constraints, filters and expected output.
