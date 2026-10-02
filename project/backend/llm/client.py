@@ -1,4 +1,4 @@
-"""LLM provider wrapper -- NVIDIA-hosted models via OpenAI-compatible API."""
+"""LLM provider wrapper -- NVIDIA-hosted models (default) or any OpenAI-compatible API."""
 from __future__ import annotations
 
 import time
@@ -34,9 +34,15 @@ class NvidiaLLMClient(LLMClient):
 
     _TIMEOUT = 300  # seconds -- NVIDIA shared infra can be slow under load
 
-    def __init__(self, api_key: str, model: str = "meta/llama-3.1-70b-instruct") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "nvidia/llama-3.1-nemotron-70b-instruct",
+        base_url: str | None = None,
+    ) -> None:
+        # base_url=None keeps the NVIDIA endpoint; pass "https://api.openai.com/v1" for OpenAI.
         self._client = OpenAI(
-            base_url=self._BASE_URL,
+            base_url=base_url or self._BASE_URL,
             api_key=api_key,
             timeout=self._TIMEOUT,
         )

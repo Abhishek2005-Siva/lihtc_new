@@ -8,7 +8,7 @@ An agent that answers plain-English questions about Low-Income Housing Tax Credi
 
 ## Streamlit app
 
-The agent UI. It needs a reachable Neo4j database: set `NEO4J_URI`, `NEO4J_USER` and `NEO4J_PASSWORD` (in a `.env` file locally, or in the app's Secrets on Streamlit Cloud). Paste your NVIDIA API key in the sidebar.
+The agent UI. It needs a reachable Neo4j database: set `NEO4J_URI`, `NEO4J_USER` and `NEO4J_PASSWORD` (in a `.env` file locally, or in the app's Secrets on Streamlit Cloud). Pick OpenAI or NVIDIA (free) in the sidebar and paste that provider's key.
 
 ```bash
 pip install -r requirements.txt
@@ -62,7 +62,7 @@ export NVIDIA_API_KEY=<your key>
 streamlit run frontend/app.py
 ```
 
-Optional: `FAST_MODEL` and `SYNTH_MODEL` choose the planning and synthesis models (defaults: `meta/llama-3.1-8b-instruct` and `meta/llama-3.1-70b-instruct`).
+Optional: `FAST_MODEL` and `SYNTH_MODEL` choose the planning and synthesis models (both default to `nvidia/llama-3.1-nemotron-70b-instruct`).
 
 ## Landing page
 
