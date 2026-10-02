@@ -41,6 +41,36 @@ def _get_neo4j(uri: str, user: str, pwd: str) -> Neo4jClient:
 
 # ---------------------------------------------------------------------------
 
+PROVIDERS = {
+    "NVIDIA (free)": {
+        "base_url": None,  # NvidiaLLMClient default
+        "fast": "nvidia/llama-3.1-nemotron-70b-instruct",
+        "synth": ["nvidia/llama-3.1-nemotron-70b-instruct", "nvidia/nemotron-3-super-120b-a12b",
+                  "mistralai/mistral-large-2-instruct"],
+        "hint": "nvapi-…  (free key at build.nvidia.com)",
+    },
+    "OpenAI": {
+        "base_url": "https://api.openai.com/v1",
+        "fast": "gpt-4o-mini",
+        "synth": ["gpt-4o", "gpt-4o-mini", "gpt-4.1-mini"],
+        "hint": "sk-…",
+    },
+}
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _neo4j_status(uri: str, user: str, password: str) -> tuple[bool, str]:
+    """Quick connectivity check so a missing database is obvious before the first question."""
+    try:
+        from neo4j import GraphDatabase
+
+        with GraphDatabase.driver(uri, auth=(user, password), connection_timeout=3) as driver:
+            driver.verify_connectivity()
+        return True, ""
+    except Exception as exc:  # noqa: BLE001 - any failure means "not connected"
+        return False, str(exc)[:160]
+
+
 def main() -> None:
     st.set_page_config(page_title="LIHTC Agent", page_icon="🏠", layout="wide")
     _render_sidebar()
@@ -52,19 +82,20 @@ def _render_sidebar() -> None:
         st.title("LIHTC Agent")
         st.divider()
 
+        provider = st.selectbox("LLM provider", list(PROVIDERS), key="provider")
+        cfg = PROVIDERS[provider]
+
         if "api_key" not in st.session_state:
             st.session_state["api_key"] = load_settings().nvidia_api_key or ""
 
-        api_key = st.text_input("NVIDIA API Key", type="password",
-                                value=st.session_state["api_key"])
-        if api_key:
-            st.session_state["api_key"] = api_key
+        api_key = st.text_input("API key", type="password",
+                                value=st.session_state["api_key"],
+                                placeholder=cfg["hint"],
+                                help="Used only in this browser session.")
+        st.session_state["api_key"] = api_key
 
         st.session_state["synth_model"] = st.selectbox(
-            "Synthesizer model",
-            ["meta/llama-3.1-70b-instruct", "meta/llama-3.1-8b-instruct",
-             "nvidia/llama-3.1-nemotron-70b-instruct"],
-            index=0,
+            "Synthesizer model", cfg["synth"], key=f"synth_{provider}",
         )
 
         if st.button("Clear conversation"):
@@ -73,7 +104,17 @@ def _render_sidebar() -> None:
             st.rerun()
 
         st.divider()
-        st.caption(f"Neo4j: {load_settings().neo4j_uri}")
+        settings = load_settings()
+        ok, detail = _neo4j_status(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
+        st.caption(f"Neo4j: {settings.neo4j_uri} — {'connected' if ok else 'not connected'}")
+        if not ok:
+            st.warning(
+                "No Neo4j database is reachable, so questions cannot be answered yet. "
+                "Set NEO4J_URI, NEO4J_USER and NEO4J_PASSWORD (in a .env file locally, or in the "
+                "app's Secrets on Streamlit Cloud) and reload.",
+                icon="⚠️",
+            )
+            st.caption(detail)
 
 
 def _render_chat() -> None:
@@ -96,7 +137,7 @@ def _render_chat() -> None:
     if not question:
         return
     if not st.session_state.get("api_key"):
-        st.toast("Add your NVIDIA API key in the sidebar first.")
+        st.toast("Add your API key (OpenAI or NVIDIA) in the sidebar first.")
         return
 
     st.session_state.messages.append({"role": "user", "content": question})
@@ -123,20 +164,21 @@ def _render_examples() -> None:
     ]
     cols = st.columns(2)
     for i, ex in enumerate(examples):
-        if cols[i % 2].button(ex, use_container_width=True, key=f"ex_{i}"):
+        if cols[i % 2].button(ex, width="stretch", key=f"ex_{i}"):
             st.session_state.messages.append({"role": "user", "content": ex})
             st.rerun()
 
 
 def _run_pipeline(question: str, ctx: ConversationContext) -> None:
     api_key     = st.session_state["api_key"]
-    synth_model = st.session_state.get("synth_model", "meta/llama-3.1-70b-instruct")
+    provider    = PROVIDERS[st.session_state.get("provider", "NVIDIA (free)")]
+    synth_model = st.session_state.get("synth_model", provider["synth"][0])
     settings    = load_settings()
     ontology    = _load_ontology()
     neo4j       = _get_neo4j(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
 
-    fast_llm  = NvidiaLLMClient(api_key=api_key, model="meta/llama-3.1-8b-instruct")
-    synth_llm = NvidiaLLMClient(api_key=api_key, model=synth_model)
+    fast_llm  = NvidiaLLMClient(api_key=api_key, model=provider["fast"], base_url=provider["base_url"])
+    synth_llm = NvidiaLLMClient(api_key=api_key, model=synth_model, base_url=provider["base_url"])
 
     # Fresh ToolCache every question — no caching carries over between turns,
     # so one question's results can never leak into another's.
@@ -306,7 +348,7 @@ def _render_step_card(n: int, record, attempts: list[dict]) -> None:
                     f"Relevance check: {score:.0%} — {record.validation_reason}</span>",
                     unsafe_allow_html=True,
                 )
-            st.dataframe(record.rows[:10], use_container_width=True)
+            st.dataframe(record.rows[:10], width="stretch")
 
 
 def _render_synthesis(s: dict) -> None:
