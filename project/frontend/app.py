@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import re
+import urllib.request
 import streamlit as st
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -44,9 +46,8 @@ def _get_neo4j(uri: str, user: str, pwd: str) -> Neo4jClient:
 PROVIDERS = {
     "NVIDIA (free)": {
         "base_url": None,  # NvidiaLLMClient default
-        "fast": "nvidia/llama-3.1-nemotron-70b-instruct",
-        "synth": ["nvidia/llama-3.1-nemotron-70b-instruct", "nvidia/nemotron-3-super-120b-a12b",
-                  "mistralai/mistral-large-2-instruct"],
+        "fast": "",   # filled live: first of nvidia_models()
+        "synth": [],  # filled live by nvidia_models()
         "hint": "nvapi-…  (free key at build.nvidia.com)",
     },
     "OpenAI": {
@@ -56,6 +57,36 @@ PROVIDERS = {
         "hint": "sk-…",
     },
 }
+
+# NVIDIA's hosted lineup changes often (models get retired without notice), so read the live list.
+NVIDIA_MODELS_URL = "https://integrate.api.nvidia.com/v1/models"
+_NON_CHAT = re.compile(
+    r"embed|rerank|safety|guard|reward|parse|vlm|vision|clip|retriev|riva|neva|vila|kosmos|"
+    r"deplot|fuyu|video|cosmos|ising|starcoder", re.I)
+_PREFERRED = [
+    "mistralai/mistral-large-2-instruct",
+    "nvidia/llama-3.1-nemotron-70b-instruct",
+    "nvidia/nemotron-nano-3-30b-a3b",
+    "openai/gpt-oss-20b",
+]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def nvidia_models() -> list[str]:
+    """Chat models NVIDIA is serving right now, preferred ones first. Falls back to a short list."""
+    try:
+        with urllib.request.urlopen(NVIDIA_MODELS_URL, timeout=8) as resp:
+            ids = [m["id"] for m in json.load(resp)["data"]]
+        chat = [i for i in ids if not _NON_CHAT.search(i)]
+        first = [m for m in _PREFERRED if m in chat]
+        return (first + [i for i in chat if i not in first]) or list(_PREFERRED)
+    except Exception:  # noqa: BLE001 - offline or endpoint changed
+        return list(_PREFERRED)
+
+
+def models_for(provider: str) -> list[str]:
+    return nvidia_models() if provider.startswith("NVIDIA") else PROVIDERS[provider]["synth"]
+
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -95,7 +126,7 @@ def _render_sidebar() -> None:
         st.session_state["api_key"] = api_key
 
         st.session_state["synth_model"] = st.selectbox(
-            "Synthesizer model", cfg["synth"], key=f"synth_{provider}",
+            "Synthesizer model", models_for(provider), key=f"synth_{provider}",
         )
 
         if st.button("Clear conversation"):
@@ -171,13 +202,15 @@ def _render_examples() -> None:
 
 def _run_pipeline(question: str, ctx: ConversationContext) -> None:
     api_key     = st.session_state["api_key"]
-    provider    = PROVIDERS[st.session_state.get("provider", "NVIDIA (free)")]
-    synth_model = st.session_state.get("synth_model", provider["synth"][0])
+    provider_name = st.session_state.get("provider", "NVIDIA (free)")
+    provider    = PROVIDERS[provider_name]
+    synth_model = st.session_state.get("synth_model", models_for(provider_name)[0])
+    fast_model  = models_for(provider_name)[0] if provider_name.startswith("NVIDIA") else provider["fast"]
     settings    = load_settings()
     ontology    = _load_ontology()
     neo4j       = _get_neo4j(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
 
-    fast_llm  = NvidiaLLMClient(api_key=api_key, model=provider["fast"], base_url=provider["base_url"])
+    fast_llm  = NvidiaLLMClient(api_key=api_key, model=fast_model, base_url=provider["base_url"])
     synth_llm = NvidiaLLMClient(api_key=api_key, model=synth_model, base_url=provider["base_url"])
 
     # Fresh ToolCache every question — no caching carries over between turns,
